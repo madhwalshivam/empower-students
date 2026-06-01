@@ -19,7 +19,8 @@ import {
   PhoneCall,
   ShieldCheck,
   ChevronRight,
-  ClipboardList
+  ClipboardList,
+  Wallet
 } from 'lucide-react';
 import {
   startReflectSession,
@@ -283,7 +284,7 @@ export default function ParentReflectPage() {
       setScreen('interview');
       setStatusMessage('Ready...');
       setTimeout(() => {
-        speakQuestion(res.turn.question);
+        if (res.turn) speakQuestion(res.turn.question);
       }, 800);
     }
   };
@@ -295,7 +296,7 @@ export default function ParentReflectPage() {
       const rep = await getReflectSessionReport(session.id);
       if ('error' in rep) {
         setError(rep.error || 'Failed to retrieve report.');
-        setScreen('gate');
+        setScreen('consent');
       } else {
         setReport(rep);
         setScreen('report');

@@ -1259,7 +1259,7 @@ function prBuildHistoryPayload(
       .sort((a: any, b: any) => b[1] - a[1]);
 
     if (list.length > 0) {
-      lines.push(`Voice emotion signals: ${list.map(x => `${x[0]} ${Math.round(x[1] * 100)}%`).join(', ')}`);
+      lines.push(`Voice emotion signals: ${list.map((x: any) => `${x[0]} ${Math.round(x[1] * 100)}%`).join(', ')}`);
       if (latestEmotions.felt_sense) {
         lines.push(`Felt sense: ${latestEmotions.felt_sense}`);
       }

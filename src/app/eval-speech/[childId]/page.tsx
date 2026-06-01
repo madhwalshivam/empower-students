@@ -18,7 +18,8 @@ import {
   User,
   Wallet,
   CheckCircle2,
-  XCircle
+  XCircle,
+  ChevronRight
 } from 'lucide-react';
 import {
   startSpeechEvalSession,
@@ -278,7 +279,7 @@ export default function SpeechEvalPage() {
       setScreen('interview');
       setStatusMessage('Ready for next question...');
       setTimeout(() => {
-        speakPrompt(res.question.prompt);
+        if (res.question) speakPrompt(res.question.prompt);
       }, 500);
     }
   };
