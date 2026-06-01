@@ -1,0 +1,23 @@
+# Allow public access to Leda voice MP3 files.
+# These are TTS-synthesized audio (no PII; same text → same hash → same file
+# across all users). Safe to serve directly.
+
+<RequireAll>
+  Require all granted
+</RequireAll>
+
+# Apache 2.2 fallback
+<IfModule !mod_authz_core.c>
+  Order Allow,Deny
+  Allow from all
+</IfModule>
+
+# Correct MIME types
+<IfModule mod_mime.c>
+  AddType audio/mpeg .mp3
+</IfModule>
+
+# Long cache — these files are immutable (hashed by content)
+<IfModule mod_headers.c>
+  Header set Cache-Control "public, max-age=2592000, immutable"
+</IfModule>

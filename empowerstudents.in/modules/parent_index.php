@@ -1,0 +1,66 @@
+<?php
+require_once __DIR__ . '/_questionnaire.php';
+$child = module_require_child();
+$age = calc_age_years($child['dob']);
+$band = age_band($age);
+
+// Parent index — self-rated. 0 = strongly disagree / never, 5 = strongly agree / always.
+$qs = [
+    ['q' => 'I know my child\'s closest friends by name',
+     'q_hi' => 'मैं अपने बच्चे के सबसे क़रीबी दोस्तों के नाम जानता/जानती हूँ',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=2'],
+    ['q' => 'I know what my child is doing online (apps, games, content)',
+     'q_hi' => 'मुझे पता है मेरा बच्चा ऑनलाइन क्या कर रहा है (ऐप, गेम, सामग्री)',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=2'],
+    ['q' => 'I have at least 30 minutes of one-on-one quality time with this child every day',
+     'q_hi' => 'मैं हर दिन कम से कम 30 मिनट इस बच्चे के साथ अकेले गुणवत्तापूर्ण समय बिताता/बिताती हूँ',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=2'],
+    ['q' => 'I listen without interrupting when my child shares feelings',
+     'q_hi' => 'जब मेरा बच्चा भावनाएँ बताता है तो मैं बिना टोके सुनता/सुनती हूँ',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=2'],
+    ['q' => 'I praise effort more than outcome',
+     'q_hi' => 'मैं परिणाम से ज़्यादा कोशिश की तारीफ़ करता/करती हूँ',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=2'],
+    ['q' => 'I rarely shout, hit, or threaten as discipline',
+     'q_hi' => 'मैं अनुशासन के लिए चिल्लाता, मारता या धमकाता बहुत कम हूँ',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=2', 'critical' => true],
+    ['q' => 'My child can come to me with mistakes or problems without fear',
+     'q_hi' => 'मेरा बच्चा बिना डर के अपनी ग़लतियाँ या समस्याएँ मुझे बता सकता है',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=2'],
+    ['q' => 'There is a predictable routine for sleep, meals, and study',
+     'q_hi' => 'सोने, खाने और पढ़ाई की एक तय दिनचर्या है',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=2'],
+    ['q' => 'My partner/family and I are aligned on parenting decisions',
+     'q_hi' => 'मेरे जीवनसाथी / परिवार और मैं पालन-पोषण के फ़ैसलों पर एकमत हैं',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=1'],
+    ['q' => 'I model the behaviour I expect (phone use, kindness, calm under stress)',
+     'q_hi' => 'जो व्यवहार मैं अपेक्षा करता/करती हूँ, वैसा ही ख़ुद करता/करती हूँ (फ़ोन का उपयोग, दयालुता, तनाव में शांति)',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=2'],
+    ['q' => 'I notice and name my child\'s strengths weekly',
+     'q_hi' => 'मैं हर हफ़्ते अपने बच्चे की ख़ूबियों को पहचानता/पहचानती और बताता/बताती हूँ',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=2'],
+    ['q' => 'My own stress level (work, finance, health) does NOT spill over onto my child',
+     'q_hi' => 'मेरा ख़ुद का तनाव (काम, पैसा, स्वास्थ्य) मेरे बच्चे पर नहीं उतरता',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=1'],
+    ['q' => 'I read with / to my child or have unstructured talks daily',
+     'q_hi' => 'मैं हर दिन अपने बच्चे के साथ पढ़ता/पढ़ती हूँ या खुली बातचीत करता/करती हूँ',
+     'type' => 'likert', 'min' => 0, 'max' => 5, 'concern_if' => '<=2'],
+    ['q' => 'I have a clear picture of what worries my child most right now',
+     'q_hi' => 'मुझे साफ़ पता है कि अभी मेरे बच्चे को सबसे ज़्यादा क्या चिंता है',
+     'type' => 'yesno', 'concern_if' => 'no'],
+    ['q' => 'In one or two lines: what is your biggest parenting challenge with this child?',
+     'q_hi' => 'एक-दो पंक्तियों में: इस बच्चे के साथ आपकी सबसे बड़ी पालन-पोषण चुनौती क्या है?',
+     'type' => 'text'],
+];
+
+run_questionnaire($child, [
+    'module_key' => 'parent_index',
+    'title'      => 'Parent index',
+    'title_hi'   => 'पैरेंट इंडेक्स',
+    'intro'      => 'A short, honest self-rating. There are no right answers — this helps us point you to the highest-impact area to focus on. Your child does NOT see this.',
+    'intro_hi'   => 'एक छोटी, ईमानदार स्व-मूल्यांकन। कोई सही उत्तर नहीं हैं — यह हमें बताता है कि किस क्षेत्र पर ध्यान देने से सबसे ज़्यादा फ़र्क़ पड़ेगा। आपका बच्चा यह नहीं देखता।',
+    'questions'  => $qs,
+    'max_per'    => 5,
+    'ai_system'  => 'You are a paediatric counsellor. The parent has self-rated 14 items + a written challenge. Compute a parent-nurture score out of 100 (mention it), name the top 2 strengths and top 2 areas to grow, then give 3 specific, doable changes for the next 14 days. Warm, non-judgemental, Indian context. Maximum 250 words. Plain text.',
+    'ai_user_tail' => 'Address the parent directly as "you". End with one encouraging line.',
+]);

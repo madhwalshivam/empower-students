@@ -1,0 +1,16 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /api/
+Disallow: /uploads/
+Disallow: /lead_submit.php
+Disallow: /payment_return.php
+Disallow: /payment_webhook.php
+Disallow: /update_panel.php
+Disallow: /install.php
+Disallow: /_diag.php
+Disallow: /admin_passwordless_login.php
+Disallow: /api_topup_create.php
+Disallow: /fix_specialist_photos.php
+
+Sitemap: https://empowerstudents.in/sitemap.xml

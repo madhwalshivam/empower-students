@@ -1,0 +1,3 @@
+# Audio recordings are private — accessed only by signed-in admin via PHP.
+Require all denied
+Deny from all

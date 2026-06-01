@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node check-all-tables.js)",
+      "Bash(curl -s http://localhost:3000/ -o /tmp/home.html -w \"HOME status:%{http_code} size:%{size_download}\\\\n\")",
+      "Bash(curl -s http://localhost:3000/login -o /tmp/login.html -w \"LOGIN status:%{http_code} size:%{size_download}\\\\n\")",
+      "Bash(curl -s http://localhost:3000/specialists -o /tmp/spec.html -w \"SPEC status:%{http_code} size:%{size_download}\\\\n\")",
+      "Bash(curl -s http://localhost:3000/about -o /tmp/about.html -w \"ABOUT status:%{http_code} size:%{size_download}\\\\n\")",
+      "Bash(rm -rf src/app/api/_logintest)",
+      "Bash(mkdir -p src/app/api/logintest)"
+    ]
+  }
+}

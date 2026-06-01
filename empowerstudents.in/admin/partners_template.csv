@@ -1,0 +1,4 @@
+name,contact_person,phone,whatsapp,email,address,area,pincode,category,website,google_maps_url,rating,review_count,notes
+Example Speech Therapy Center,Dr. Rina Sharma,9876543210,9876543210,info@example.com,"A-12, Sector 50, Noida",Noida,201301,speech,https://example.com,https://maps.google.com/?cid=12345,4.5,87,"Saw on Justdial ad"
+Example Special Ed School,Mrs. Anjali Verma,9123456780,9123456780,,B-3 Greater Noida West,Greater Noida,201310,special_ed,,,4.2,42,
+Example Autism Center,,9988776655,,contact@autism.in,"Indirapuram, Block C",Ghaziabad,201014,autism,,,,, "No contact name listed"
