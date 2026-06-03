@@ -372,13 +372,19 @@ export async function ceSubmitAnswer(
     return { ok: false, error: 'Session is not active' };
   }
 
-  // Fetch latest unanswered turn
+  // Fetch the pending unanswered turn. This MUST be the SAME turn that
+  // ceGenerateNextQuestion displays — i.e. the LOWEST-numbered unanswered turn
+  // (it scans turns ascending and returns the first without an answer). If this
+  // ordering disagrees (e.g. descending → highest), the answer gets written to a
+  // different turn than the one on screen, leaving the displayed turn forever
+  // unanswered — so the same question is shown again and again and the session
+  // never advances. Keep both ascending.
   const { data: turn, error: tErr } = await supabase
     .from('child_eval_turns')
     .select('*')
     .eq('session_id', sessionId)
     .is('answer_json', null)
-    .order('turn_no', { ascending: false })
+    .order('turn_no', { ascending: true })
     .limit(1)
     .maybeSingle();
 
