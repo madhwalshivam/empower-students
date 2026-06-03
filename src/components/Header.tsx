@@ -116,9 +116,6 @@ export default function Header() {
           {/* Auth Sections */}
           {user ? (
             <>
-              <Link href="/wallet" className="es-credits-pill inline-flex items-center gap-1.5 text-xs rounded-full px-4 py-2 border border-indigo-100 dark:border-slate-800 bg-indigo-50 dark:bg-slate-800 text-indigo-700 dark:text-indigo-400 hover:scale-105 transition-transform font-bold">
-                <Coins size={14} /> <span>{profile?.credits || 0} {t('nav.cr')}</span>
-              </Link>
               <Link href={user?.user_metadata?.role === 'admin' ? '/admin/dashboard' : (user?.user_metadata?.role === 'partner' ? '/partner/dashboard' : '/dashboard')} className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:text-indigo-850 font-bold transition-colors">
                 <LayoutDashboard size={14} /> {t('nav.dashboard')}
               </Link>
@@ -149,11 +146,6 @@ export default function Header() {
 
         {/* Mobile menu trigger */}
         <div className="md:hidden flex items-center gap-2">
-          {user && (
-            <Link href="/wallet" className="es-credits-pill inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1.5 border border-indigo-100 bg-indigo-50 text-indigo-750 font-bold">
-              <Coins size={12} /> {profile?.credits || 0}
-            </Link>
-          )}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg focus:outline-none border-none bg-transparent"
@@ -217,19 +209,12 @@ export default function Header() {
               >
                 {t('nav.dashboard')}
               </Link>
-              <Link
-                href="/wallet"
-                onClick={() => setMobileMenuOpen(false)}
-                className="text-indigo-750 font-bold py-1 border-b border-slate-50 dark:border-slate-800 flex items-center gap-1"
-              >
-                <Coins size={14} /> Wallet ({profile?.credits || 0} cr)
-              </Link>
               <button
                 onClick={() => {
                   setMobileMenuOpen(false);
                   handleLogout();
                 }}
-                className="text-rose-600 font-semibold text-left py-1 border-none bg-transparent cursor-pointer flex items-center gap-1"
+                className="text-rose-650 font-semibold text-left py-1 border-none bg-transparent cursor-pointer flex items-center gap-1"
               >
                 <LogOut size={14} /> {t('nav.logout')}
               </button>

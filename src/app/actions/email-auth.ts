@@ -101,7 +101,7 @@ export async function signUpAction(
       referral_code: uppercaseCode,
       upi_id: additionalFields?.upiId?.trim() || null,
       revenue_share: 0.30, // 30% revenue share default
-      status: 'active'
+      status: 'pending'
     });
 
     if (partnerInsertErr) {
@@ -148,18 +148,6 @@ export async function signUpAction(
         console.error('Referral record insert error:', referralErr);
       }
     }
-  }
-
-  // Sign in to establish session
-  const supabase = await createServerSupabase();
-  const { error: loginError } = await supabase.auth.signInWithPassword({
-    email: trimmedEmail,
-    password: password,
-  });
-
-  if (loginError) {
-    console.error('Auth signin after signup error:', loginError);
-    return { ok: false, error: 'Account created but login failed. Please try logging in.' };
   }
 
   return { ok: true };
@@ -209,6 +197,29 @@ export async function loginAction(
   if (role === 'admin') {
     redirectUrl = '/admin/dashboard';
   } else if (role === 'partner') {
+    // Check partner approval status
+    const supabaseAdmin = createAdminClient();
+    const { data: partner, error: partnerErr } = await supabaseAdmin
+      .from('partners')
+      .select('status')
+      .eq('id', data.user.id)
+      .maybeSingle();
+
+    if (partnerErr || !partner) {
+      await supabase.auth.signOut();
+      return { ok: false, error: 'Partner profile not found.' };
+    }
+
+    if (partner.status === 'pending') {
+      await supabase.auth.signOut();
+      return { ok: false, error: 'Your partner registration request is pending approval. You will be able to log in once the admin approves your account.' };
+    }
+
+    if (partner.status !== 'active') {
+      await supabase.auth.signOut();
+      return { ok: false, error: `Your partner account is currently ${partner.status}. Please contact support.` };
+    }
+
     redirectUrl = '/partner/dashboard';
   }
 

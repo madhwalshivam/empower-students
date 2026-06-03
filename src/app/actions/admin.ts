@@ -180,3 +180,37 @@ export async function deleteSpecialistAction(id: number) {
     return { ok: false, error: err.message || 'An unexpected error occurred.' };
   }
 }
+
+export async function updatePartnerStatusAction(
+  partnerId: string,
+  status: 'active' | 'pending' | 'paused' | 'terminated'
+) {
+  try {
+    const supabase = await createClient();
+
+    // Verify Admin Role using user token
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || user.user_metadata?.role !== 'admin') {
+      return { ok: false, error: 'Unauthorized.' };
+    }
+
+    const supabaseAdmin = createAdminClient();
+    const { error } = await supabaseAdmin
+      .from('partners')
+      .update({ status })
+      .eq('id', partnerId);
+
+    if (error) {
+      console.error('Update partner status error:', error);
+      return { ok: false, error: error.message };
+    }
+
+    revalidatePath('/admin/partners');
+    revalidatePath('/admin/dashboard');
+
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err.message || 'An unexpected error occurred.' };
+  }
+}
+

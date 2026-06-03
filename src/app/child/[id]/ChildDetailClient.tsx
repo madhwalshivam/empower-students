@@ -14,11 +14,17 @@ import {
   Binary,
   BookOpen,
   Apple,
-  Check,
+  CheckCircle2,
   Gift,
   RotateCcw,
   BarChart2,
-  AlertTriangle
+  AlertTriangle,
+  Play,
+  RefreshCw,
+  FileText,
+  Coins,
+  Trophy,
+  ChevronRight,
 } from 'lucide-react';
 
 interface ChildDetailClientProps {
@@ -26,6 +32,7 @@ interface ChildDetailClientProps {
   assessments: any[];
   carePack: any;
   parentCredits: number;
+  inProgressModules?: string[];
 }
 
 export default function ChildDetailClient({
@@ -33,6 +40,7 @@ export default function ChildDetailClient({
   assessments,
   carePack,
   parentCredits,
+  inProgressModules = [],
 }: ChildDetailClientProps) {
   const router = useRouter();
   const [resetLoading, setResetLoading] = useState(false);
@@ -40,17 +48,18 @@ export default function ChildDetailClient({
   const [resetSuccess, setResetSuccess] = useState('');
 
   const completedCount = assessments.length;
-  const progressPct = Math.round((completedCount / 8) * 100);
+  const totalModules = 8;
+  const progressPct = Math.round((completedCount / totalModules) * 100);
 
   const allModules = [
-    { key: 'health', label: 'Health Screening', icon: Heart, desc: 'Growth, sleep, sensory, milestone red-flags' },
-    { key: 'mind_power', label: 'Mind Power', icon: Brain, desc: 'Memory, attention, problem-solving' },
-    { key: 'behavior', label: 'Behaviour', icon: Smile, desc: 'Social skills, emotional regulation, self-control' },
-    { key: 'general_awareness', label: 'General Awareness', icon: Globe, desc: '2-min adaptive general knowledge quiz' },
-    { key: 'special_talent', label: 'Special Talent', icon: Sparkles, desc: 'Spotting a unique child gift to nurture' },
-    { key: 'math', label: 'Maths Level', icon: Binary, desc: 'Adaptive fundamental number sense finder' },
-    { key: 'language', label: 'Language & Reading', icon: BookOpen, desc: 'Word-power and timed comprehension checks' },
-    { key: 'diet', label: 'Diet Advice', icon: Apple, desc: 'Tuned child food chart and sleep plan' },
+    { key: 'health', label: 'Health Screening', icon: Heart, desc: 'Growth, sleep, sensory, milestone red-flags', color: '#ef4444' },
+    { key: 'mind_power', label: 'Mind Power', icon: Brain, desc: 'Memory, attention, problem-solving', color: '#8b5cf6' },
+    { key: 'behavior', label: 'Behaviour', icon: Smile, desc: 'Social skills, emotional regulation, self-control', color: '#f59e0b' },
+    { key: 'general_awareness', label: 'General Awareness', icon: Globe, desc: '2-min adaptive general knowledge quiz', color: '#06b6d4' },
+    { key: 'special_talent', label: 'Special Talent', icon: Sparkles, desc: 'Spotting a unique child gift to nurture', color: '#ec4899' },
+    { key: 'math', label: 'Maths Level', icon: Binary, desc: 'Adaptive fundamental number sense finder', color: '#10b981' },
+    { key: 'language', label: 'Language & Reading', icon: BookOpen, desc: 'Word-power and timed comprehension checks', color: '#3b82f6' },
+    { key: 'diet', label: 'Diet & Nutrition', icon: Apple, desc: 'Tuned child food chart and sleep plan', color: '#84cc16' },
   ];
 
   const handleReset = async () => {
@@ -76,10 +85,8 @@ export default function ChildDetailClient({
     try {
       const res = await resetEvaluationAction(Number(child.id));
       if (res.ok) {
-        setResetSuccess('Evaluation reset. Reloading child page...');
-        setTimeout(() => {
-          router.refresh();
-        }, 1200);
+        setResetSuccess('Evaluation reset successfully. Reloading...');
+        setTimeout(() => { router.refresh(); }, 1200);
       } else {
         setResetError(res.error || 'Failed to reset evaluation.');
       }
@@ -90,160 +97,259 @@ export default function ChildDetailClient({
     }
   };
 
+  // Calculate age from DOB
+  const age = child.dob ? (() => {
+    const dob = new Date(child.dob);
+    const now = new Date();
+    const yr = now.getFullYear() - dob.getFullYear();
+    const mo = now.getMonth() - dob.getMonth();
+    return mo < 0 ? yr - 1 : yr;
+  })() : null;
+
   return (
-    <div className="space-y-8 max-w-5xl mx-auto">
-      {/* Back Button */}
-      <Link href="/dashboard" className="text-sm text-indigo-650 dark:text-indigo-400 hover:underline flex items-center gap-1">
-        <ArrowLeft size={16} /> Back to Dashboard
+    <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 28 }}>
+
+      {/* Back link */}
+      <Link href="/dashboard" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#6366f1', textDecoration: 'none' }}>
+        <ArrowLeft size={15} /> Back to Dashboard
       </Link>
 
-      {/* Child Header Card */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 p-6 sm:p-8 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="flex items-center gap-4">
-          <div className="w-16 h-16 bg-indigo-600 rounded-full flex items-center justify-center text-white font-extrabold text-2xl shadow-md">
-            {child.name ? child.name.substring(0, 1).toUpperCase() : '?'}
-          </div>
-          <div>
-            <h1 className="heading-fun text-3xl font-extrabold text-slate-800 dark:text-slate-100">
-              {child.name}
-            </h1>
-            <p className="text-sm text-slate-500 mt-1">
-              {child.dob} ({child.gender || '—'}) ·{' '}
-              <span className="font-bold text-indigo-500">Grade {child.class_grade || '—'}</span>
-            </p>
-            {child.diagnosis && (
-              <p className="text-xs text-rose-600 dark:text-rose-400 mt-1 font-semibold">
-                Diagnosis: {child.diagnosis}
+      {/* ── Child Hero Card ── */}
+      <div style={{ background: '#fff', borderRadius: 24, border: '1px solid #f1f5f9', boxShadow: '0 4px 24px rgba(99,102,241,0.07)', overflow: 'hidden' }}>
+        {/* Colour band */}
+        <div style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', height: 6 }} />
+
+        <div style={{ padding: '28px 32px', display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'center', justifyContent: 'space-between' }}>
+          {/* Avatar + info */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: '50%',
+              background: 'linear-gradient(135deg, #4f46e5, #7c3aed)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#fff', fontWeight: 900, fontSize: 28,
+              boxShadow: '0 8px 20px rgba(99,102,241,0.35)',
+              flexShrink: 0,
+            }}>
+              {child.name ? child.name[0].toUpperCase() : '?'}
+            </div>
+            <div>
+              <h1 style={{ fontSize: 26, fontWeight: 900, color: '#1e293b', letterSpacing: '-0.02em', margin: 0 }}>
+                {child.name}
+              </h1>
+              <p style={{ margin: '4px 0 0', fontSize: 13, color: '#64748b', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                {age !== null && <span style={{ fontWeight: 600 }}>{age} yrs old</span>}
+                {age !== null && <span style={{ color: '#cbd5e1' }}>·</span>}
+                <span>{child.gender || 'Gender not set'}</span>
+                {child.class_grade && <><span style={{ color: '#cbd5e1' }}>·</span><span style={{ background: '#ede9fe', color: '#6d28d9', fontWeight: 700, fontSize: 11, padding: '2px 8px', borderRadius: 20 }}>Grade {child.class_grade}</span></>}
               </p>
-            )}
+              {child.diagnosis && child.diagnosis !== 'none' && (
+                <p style={{ margin: '6px 0 0', fontSize: 12, color: '#dc2626', fontWeight: 700, background: '#fef2f2', padding: '3px 10px', borderRadius: 20, display: 'inline-block' }}>
+                  Diagnosis: {child.diagnosis}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Progress + report button */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                Assessment Progress
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 140, height: 6, background: '#f1f5f9', borderRadius: 99, overflow: 'hidden' }}>
+                  <div style={{ width: `${progressPct}%`, height: '100%', background: 'linear-gradient(90deg, #4f46e5, #7c3aed)', borderRadius: 99, transition: 'width 0.6s ease' }} />
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 800, color: '#4f46e5' }}>{completedCount}/{totalModules}</span>
+              </div>
+            </div>
+            <Link
+              href={`/report/${child.id}`}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                background: completedCount > 0 ? 'linear-gradient(135deg, #4f46e5, #7c3aed)' : '#e2e8f0',
+                color: completedCount > 0 ? '#fff' : '#94a3b8',
+                padding: '11px 22px', borderRadius: 14,
+                fontWeight: 700, fontSize: 14, textDecoration: 'none',
+                boxShadow: completedCount > 0 ? '0 6px 20px rgba(99,102,241,0.35)' : 'none',
+                transition: 'transform 0.15s',
+              }}
+            >
+              <FileText size={16} /> View AI Report
+            </Link>
           </div>
         </div>
-        <Link
-          href={`/report/${child.id}`}
-          className="bg-indigo-650 text-white px-5 py-3 rounded-2xl font-bold hover:scale-[1.02] transition-transform text-center shadow-md"
-        >
-          View AI Report
-        </Link>
       </div>
 
-      {/* Care Pack block */}
-      {completedCount > 0 && (
-        <div className="bg-indigo-600 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
-          <div className="absolute -top-1.5 right-6 bg-white/20 text-white px-4 py-1 rounded-full text-xs font-bold">
-            SAVE 148 cr
+      {/* ── Care Pack Banner ── */}
+      {completedCount > 0 && !carePack && (
+        <div style={{
+          background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+          borderRadius: 24, padding: '28px 32px', color: '#fff',
+          display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'center', justifyContent: 'space-between',
+          boxShadow: '0 12px 40px rgba(99,102,241,0.4)', position: 'relative', overflow: 'hidden',
+        }}>
+          <div style={{ position: 'absolute', top: -30, right: -30, width: 140, height: 140, borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
+          <div style={{ position: 'absolute', bottom: -20, left: '40%', width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,255,255,0.04)' }} />
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', opacity: 0.8, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Gift size={13} /> Personalised Care Pack for {child.name}
+            </div>
+            <h2 style={{ fontSize: 20, fontWeight: 900, margin: '0 0 8px', letterSpacing: '-0.01em' }}>
+              Growth Plan · Personal Course · Daily Tracker
+            </h2>
+            <p style={{ fontSize: 13, opacity: 0.85, margin: 0, maxWidth: 480, lineHeight: 1.6 }}>
+              AI-generated from {child.name}'s actual results. Three tools in one bundle — save 148 credits vs buying separately.
+            </p>
           </div>
-
-          {!carePack ? (
-            <div className="grid sm:grid-cols-3 gap-6 items-center">
-              <div className="sm:col-span-2">
-                <p className="text-xs uppercase tracking-wider opacity-90 font-bold flex items-center gap-1.5">
-                  <Gift size={14} /> Care Pack for {child.name}
-                </p>
-                <h2 className="heading-fun text-2xl sm:text-3xl font-bold mt-1 mb-2">
-                  Three personalised tools, ready in 60 seconds
-                </h2>
-                <p className="opacity-90 text-sm leading-relaxed">
-                  Based on {child.name}'s actual assessment results — AI generates a 4-week growth plan, a personal course of 5 lessons, and unlocks 30 days of daily tracking.
-                </p>
-              </div>
-              <div className="text-center sm:text-right">
-                <div className="text-4xl font-extrabold">499 cr</div>
-                <div className="text-xs opacity-75 line-through mb-3">647 cr separately</div>
-                <Link
-                  href={`/care-pack/${child.id}`}
-                  className="inline-block bg-white text-indigo-650 hover:bg-slate-50 px-6 py-2.5 rounded-full font-bold text-sm transition-all shadow-lg hover:scale-105"
-                >
-                  Buy Care Pack
-                </Link>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <Gift size={20} />
-                <h3 className="heading-fun text-xl font-bold">{child.name}'s Care Pack</h3>
-                <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-0.5 rounded-full">
-                  ACTIVE
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-slate-800">
-                <Link
-                  href={`/growth-plan/${child.id}`}
-                  className="bg-white hover:scale-[1.02] transition-transform rounded-2xl p-5 shadow-lg block"
-                >
-                  <Heart size={28} className="text-indigo-600 mb-2" />
-                  <h4 className="font-bold text-base mb-1">Growth Plan</h4>
-                  <p className="text-xs text-slate-500">4-week personalised action plan</p>
-                </Link>
-                <Link
-                  href={`/course/${child.id}`}
-                  className="bg-white hover:scale-[1.02] transition-transform rounded-2xl p-5 shadow-lg block"
-                >
-                  <BookOpen size={28} className="text-indigo-600 mb-2" />
-                  <h4 className="font-bold text-base mb-1">Personal Course</h4>
-                  <p className="text-xs text-slate-500">5 AI-written lessons</p>
-                </Link>
-                <Link
-                  href={`/tracker/${child.id}`}
-                  className="bg-white hover:scale-[1.02] transition-transform rounded-2xl p-5 shadow-lg block"
-                >
-                  <BarChart2 size={28} className="text-indigo-600 mb-2" />
-                  <h4 className="font-bold text-base mb-1">Daily Tracker</h4>
-                  <p className="text-xs text-slate-500">{carePack.tracker_days_remaining || 0} days remaining</p>
-                </Link>
-              </div>
-            </div>
-          )}
+          <div style={{ textAlign: 'center', flexShrink: 0 }}>
+            <div style={{ fontSize: 36, fontWeight: 900, lineHeight: 1 }}>499</div>
+            <div style={{ fontSize: 12, opacity: 0.7, textDecoration: 'line-through', marginBottom: 14 }}>647 cr separately</div>
+            <Link
+              href={`/care-pack/${child.id}`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#4f46e5', padding: '11px 24px', borderRadius: 14, fontWeight: 800, fontSize: 14, textDecoration: 'none', boxShadow: '0 4px 16px rgba(0,0,0,0.15)' }}
+            >
+              <Coins size={16} /> Unlock Care Pack
+            </Link>
+          </div>
         </div>
       )}
 
-      {/* Modules List */}
-      <div className="space-y-4">
-        <h2 className="heading-fun text-2xl font-bold text-slate-800 dark:text-slate-200">
-          Assessment Modules
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Care Pack Active state */}
+      {carePack && (
+        <div style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: 24, padding: '24px 28px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <Trophy size={20} color="#059669" />
+            <h3 style={{ fontSize: 16, fontWeight: 800, color: '#065f46', margin: 0 }}>{child.name}'s Care Pack — Active</h3>
+            <span style={{ background: '#059669', color: '#fff', fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 20 }}>ACTIVE</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
+            {[
+              { href: `/growth-plan/${child.id}`, icon: Heart, label: 'Growth Plan', sub: '4-week personalised plan' },
+              { href: `/course/${child.id}`, icon: BookOpen, label: 'Personal Course', sub: '5 AI-written lessons' },
+              { href: `/tracker/${child.id}`, icon: BarChart2, label: 'Daily Tracker', sub: `${carePack.tracker_days_remaining || 0} days remaining` },
+            ].map((item) => (
+              <Link key={item.href} href={item.href} style={{ background: '#fff', borderRadius: 16, padding: '18px 20px', textDecoration: 'none', border: '1px solid #d1fae5', display: 'flex', flexDirection: 'column', gap: 8, transition: 'box-shadow 0.15s' }}>
+                <item.icon size={22} color="#059669" />
+                <div style={{ fontWeight: 800, fontSize: 14, color: '#065f46' }}>{item.label}</div>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>{item.sub}</div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Assessment Modules ── */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 900, color: '#1e293b', letterSpacing: '-0.02em', margin: 0 }}>
+            Assessment Modules
+          </h2>
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '4px 12px', borderRadius: 20 }}>
+            {completedCount} of {totalModules} completed
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
           {allModules.map((m) => {
             const completed = assessments.find((a) => a.module === m.key && a.status === 'completed');
+            const inProgress = !completed && inProgressModules.includes(m.key);
             const IconComponent = m.icon;
 
             return (
               <div
                 key={m.key}
-                className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
+                style={{
+                  background: '#fff',
+                  border: `1px solid ${completed ? '#d1fae5' : inProgress ? '#fde68a' : '#f1f5f9'}`,
+                  borderRadius: 20,
+                  padding: '20px 22px',
+                  boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 16,
+                  transition: 'box-shadow 0.2s, transform 0.2s',
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
               >
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <IconComponent className="text-indigo-650 flex-shrink-0" size={24} />
-                    <div className="flex-grow">
-                      <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm sm:text-base">
-                        {m.label}
-                      </h3>
-                      <p className="text-xs text-slate-400 dark:text-slate-500">{m.desc}</p>
-                    </div>
+                {/* Status indicator bar */}
+                {completed ? (
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #10b981, #34d399)' }} />
+                ) : inProgress ? (
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #f59e0b, #fbbf24)' }} />
+                ) : null}
+
+                {/* Icon + title */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                  <div style={{
+                    width: 44, height: 44, borderRadius: 14, flexShrink: 0,
+                    background: `${m.color}15`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <IconComponent size={22} color={m.color} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', margin: '0 0 4px', lineHeight: 1.3 }}>
+                      {m.label}
+                    </h3>
+                    <p style={{ fontSize: 12, color: '#94a3b8', margin: 0, lineHeight: 1.5 }}>{m.desc}</p>
                   </div>
                 </div>
-                <div className="pt-4 border-t border-slate-50 dark:border-slate-800/80 mt-4 flex items-center justify-between">
+
+                {/* Status + CTA */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 14, borderTop: '1px solid #f8fafc' }}>
                   {completed ? (
                     <>
-                      <span className="text-xs text-emerald-650 dark:text-emerald-400 font-bold flex items-center gap-1">
-                        <Check size={14} /> Done {completed.score !== null && `· ${completed.score}/100`}
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: '#059669' }}>
+                        <CheckCircle2 size={15} />
+                        Done{completed.score !== null ? ` · ${completed.score}/100` : ''}
                       </span>
                       <Link
                         href={`/eval/${child.id}/${m.key}`}
-                        className="text-xs font-bold text-slate-500 hover:text-indigo-600 bg-slate-100 dark:bg-slate-800 px-3.5 py-1.5 rounded-lg"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, color: '#6366f1', background: '#ede9fe', padding: '6px 14px', borderRadius: 10, textDecoration: 'none' }}
                       >
-                        Re-do
+                        <RefreshCw size={12} /> Redo
+                      </Link>
+                    </>
+                  ) : inProgress ? (
+                    <>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#d97706', display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
+                        In progress
+                      </span>
+                      <Link
+                        href={`/eval/${child.id}/${m.key}`}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          fontSize: 13, fontWeight: 800, color: '#fff',
+                          background: 'linear-gradient(135deg, #f59e0b, #f97316)',
+                          padding: '8px 18px', borderRadius: 12,
+                          textDecoration: 'none',
+                          boxShadow: '0 4px 12px rgba(245,158,11,0.3)',
+                        }}
+                      >
+                        <RefreshCw size={13} /> Resume
                       </Link>
                     </>
                   ) : (
                     <>
-                      <span className="text-xs text-slate-400 dark:text-slate-650">Pending</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#e2e8f0', display: 'inline-block' }} />
+                        Not started
+                      </span>
                       <Link
                         href={`/eval/${child.id}/${m.key}`}
-                        className="text-xs font-bold text-white bg-indigo-600 px-4 py-1.5 rounded-lg shadow-sm"
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          fontSize: 13, fontWeight: 800, color: '#fff',
+                          background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
+                          padding: '8px 18px', borderRadius: 12,
+                          textDecoration: 'none',
+                          boxShadow: '0 4px 12px rgba(99,102,241,0.3)',
+                        }}
                       >
-                        Start
+                        <Play size={13} fill="#fff" /> Begin
                       </Link>
                     </>
                   )}
@@ -254,42 +360,51 @@ export default function ChildDetailClient({
         </div>
       </div>
 
-      {/* Fresh Evaluation reset block */}
-      <div className="bg-indigo-50/50 dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 rounded-3xl p-6 sm:p-8">
-        <div className="flex items-start gap-4">
-          <RotateCcw size={28} className="text-indigo-650 flex-shrink-0 mt-1" />
-          <div className="space-y-3 flex-grow">
-            <h3 className="font-bold text-indigo-900 dark:text-indigo-300">
-              Want to do a fresh evaluation for {child.name}?
+      {/* ── Fresh Evaluation Reset ── */}
+      <div style={{ background: '#fafafa', border: '1px solid #e2e8f0', borderRadius: 24, padding: '28px 32px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 18 }}>
+          <div style={{ width: 48, height: 48, borderRadius: 16, background: '#ede9fe', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <RotateCcw size={22} color="#6d28d9" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 800, color: '#1e293b', margin: '0 0 6px' }}>
+              Start a Fresh Evaluation for {child.name}
             </h3>
-            <p className="text-sm text-slate-500 leading-relaxed">
-              After 3–6 months, kids change. Start an entirely new evaluation round — all modules reset to "not done". Old results stay safely archived for comparison.
+            <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 16px', lineHeight: 1.7 }}>
+              Children grow and change every few months. Reset all modules to re-evaluate — old results are safely archived so you can compare growth over time.
             </p>
 
             {resetError && (
-              <div className="bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl p-3 flex items-center gap-1.5">
-                <AlertTriangle size={14} />
-                <span>{resetError}</span>
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                <AlertTriangle size={15} /> {resetError}
               </div>
             )}
-
             {resetSuccess && (
-              <div className="bg-emerald-50 border border-emerald-200 text-emerald-850 text-xs rounded-xl p-3 font-semibold flex items-center gap-1.5">
-                <Check size={14} />
-                <span>{resetSuccess}</span>
+              <div style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', color: '#059669', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                <CheckCircle2 size={15} /> {resetSuccess}
               </div>
             )}
 
             <button
               onClick={handleReset}
               disabled={resetLoading}
-              className="bg-indigo-600 text-white font-bold px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 text-xs cursor-pointer border-none"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                background: resetLoading ? '#e2e8f0' : '#4f46e5',
+                color: resetLoading ? '#94a3b8' : '#fff',
+                padding: '11px 22px', borderRadius: 14,
+                fontWeight: 800, fontSize: 14, border: 'none', cursor: resetLoading ? 'not-allowed' : 'pointer',
+                boxShadow: resetLoading ? 'none' : '0 4px 16px rgba(99,102,241,0.3)',
+                transition: 'all 0.2s',
+              }}
             >
-              {resetLoading ? 'Resetting...' : 'Start Fresh Evaluation'}
+              <RotateCcw size={15} />
+              {resetLoading ? 'Resetting...' : 'Reset & Start Fresh'}
             </button>
           </div>
         </div>
       </div>
+
     </div>
   );
 }

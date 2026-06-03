@@ -3,26 +3,24 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { calcAgeYears, getAgeBand } from '@/lib/evaluations/engine';
+import { calcAgeYears } from '@/lib/evaluations/engine';
 import {
   MessageSquare,
   Coins,
   Plus,
   User,
-  Heart,
-  Brain,
   Smile,
-  Globe,
   Sparkles,
-  Binary,
-  BookOpen,
   Check,
-  Apple,
   Mic,
-  HeartHandshake
+  ChevronRight,
+  HeartHandshake,
+  ArrowRight
 } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
+
+const TOTAL_MODULES = 8;
 
 interface PageProps {
   searchParams: Promise<{ cid?: string; ack?: string }>;
@@ -61,7 +59,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   }
 
   // Fetch parent details
-  const { data: parent, error: pErr } = await supabaseAdmin
+  const { data: parent } = await supabaseAdmin
     .from('parents')
     .select('*')
     .eq('id', user.id)
@@ -79,13 +77,28 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   }
 
   // Fetch children
-  const { data: children, error: cErr } = await supabaseAdmin
+  const { data: children } = await supabaseAdmin
     .from('children')
     .select('*')
     .eq('parent_id', user.id)
     .order('created_at', { ascending: false });
 
   const childrenList = children || [];
+
+  // Completed-module counts per child (distinct modules) — drives the list + progress
+  const completedByChild: Record<number, Set<string>> = {};
+  if (childrenList.length > 0) {
+    const { data: allCompleted } = await supabaseAdmin
+      .from('assessments')
+      .select('child_id, module')
+      .in('child_id', childrenList.map((c) => c.id))
+      .eq('status', 'completed');
+    (allCompleted || []).forEach((a: any) => {
+      const cid = Number(a.child_id);
+      if (!completedByChild[cid]) completedByChild[cid] = new Set<string>();
+      if (a.module) completedByChild[cid].add(a.module);
+    });
+  }
 
   // Fetch unread feedback notes
   const { data: unreadFeedback } = await supabaseAdmin
@@ -101,20 +114,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const selectedCid = resolvedSearchParams.cid ? Number(resolvedSearchParams.cid) : (childrenList[0]?.id || 0);
   const selectedChild = childrenList.find((c) => Number(c.id) === selectedCid) || childrenList[0] || null;
 
-  // If a child is selected, fetch their modules and progress
-  let assessmentsList: any[] = [];
+  // Premium evaluations for the selected child
   let speechCompleted: any = null;
   let reflectCompleted: any = null;
 
   if (selectedChild) {
-    const { data: assessments } = await supabaseAdmin
-      .from('assessments')
-      .select('*')
-      .eq('child_id', selectedChild.id)
-      .order('completed_at', { ascending: false });
-    assessmentsList = assessments || [];
-
-    // Fetch premium evaluations
     const { data: premiumSpeech } = await supabaseAdmin
       .from('eval_sessions')
       .select('*')
@@ -137,286 +141,233 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     reflectCompleted = premiumReflect;
   }
 
-  // Dynamic modules list mapping to Lucide Icons
-  const allModules = [
-    { key: 'health', label: 'Health Screening', icon: Heart, desc: 'Growth, sleep, sensory, milestone red-flags' },
-    { key: 'mind_power', label: 'Mind Power', icon: Brain, desc: 'Memory, attention, problem-solving' },
-    { key: 'behavior', label: 'Behaviour', icon: Smile, desc: 'Social skills, emotional regulation, self-control' },
-    { key: 'general_awareness', label: 'General Awareness', icon: Globe, desc: '2-min adaptive general knowledge quiz' },
-    { key: 'special_talent', label: 'Special Talent', icon: Sparkles, desc: 'Spotting a unique child gift to nurture' },
-    { key: 'math', label: 'Maths Level', icon: Binary, desc: 'Adaptive fundamental number sense finder' },
-    { key: 'language', label: 'Language & Reading', icon: BookOpen, desc: 'Word-power and timed comprehension checks' },
-    { key: 'diet', label: 'Diet Advice', icon: Apple, desc: 'Tuned child food chart and sleep plan' },
-  ];
+  const selectedDoneCount = selectedChild ? (completedByChild[Number(selectedChild.id)]?.size || 0) : 0;
+  const selectedPct = Math.round((selectedDoneCount / TOTAL_MODULES) * 100);
 
   return (
-    <div className="space-y-8 max-w-5xl mx-auto">
+    <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 28 }}>
       {/* Unread Notes block */}
       {feedbackList.map((fb) => (
-        <div key={fb.id} className="bg-indigo-50 dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 rounded-2xl p-5 text-indigo-900 dark:text-indigo-300 text-sm flex justify-between items-start gap-4 animate-fade-in shadow-sm">
+        <div key={fb.id} style={{ background: '#eef2ff', border: '1px solid #e0e7ff', borderRadius: 16, padding: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
           <div>
-            <div className="font-bold flex items-center gap-1.5 mb-1 text-indigo-700 dark:text-indigo-400">
+            <div style={{ fontWeight: 800, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, color: '#4338ca', fontSize: 14 }}>
               <MessageSquare size={16} />
               <span>Note from clinician {fb.author}:</span>
             </div>
-            <p className="whitespace-pre-line text-xs sm:text-sm text-slate-500">{fb.body}</p>
+            <p style={{ whiteSpace: 'pre-line', fontSize: 13, color: '#64748b', margin: 0 }}>{fb.body}</p>
           </div>
           <Link
             href={`/dashboard?ack=${fb.id}${resolvedSearchParams.cid ? `&cid=${resolvedSearchParams.cid}` : ''}`}
-            className="text-xs font-bold underline shrink-0 hover:text-indigo-800 text-indigo-650"
+            style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', textDecoration: 'underline', flexShrink: 0 }}
           >
             Mark Read
           </Link>
         </div>
       ))}
 
-      {/* Greeting Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      {/* Greeting */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
         <div>
-          <h1 className="heading-fun text-3xl font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+          <h1 style={{ fontSize: 30, fontWeight: 900, color: '#1e293b', margin: 0, display: 'flex', alignItems: 'center', gap: 8, letterSpacing: '-0.02em' }}>
             <span>Hi {parent.name || 'Parent'}</span>
-            <Smile className="text-indigo-650" size={32} />
+            <Smile color="#6366f1" size={30} />
           </h1>
-          <p className="text-sm text-slate-500 mt-1 flex items-center gap-1">
+          <p style={{ fontSize: 14, color: '#64748b', margin: '6px 0 0', display: 'flex', alignItems: 'center', gap: 4 }}>
             <span>You have</span>
-            <Link href="/wallet" className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline inline-flex items-center gap-1">
+            <Link href="/wallet" style={{ color: '#4f46e5', fontWeight: 700, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               <Coins size={14} /> {parent.credits || 0} wallet credits
             </Link>
           </p>
         </div>
-        <Link
-          href="/child/add"
-          className="bg-indigo-650 text-white px-5 py-3 rounded-2xl font-bold shadow-md hover:scale-[1.02] transition-transform text-center flex items-center justify-center gap-1"
-        >
-          <Plus size={16} /> Add Child
-        </Link>
+        {childrenList.length > 0 && (
+          <Link
+            href="/child/add"
+            style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)', color: '#fff', padding: '12px 20px', borderRadius: 14, fontWeight: 700, fontSize: 14, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, boxShadow: '0 6px 18px rgba(99,102,241,0.32)' }}
+          >
+            <Plus size={16} /> Add Child
+          </Link>
+        )}
       </div>
 
       {childrenList.length === 0 ? (
-        <div className="bg-white dark:bg-slate-900 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-3xl p-12 text-center shadow-sm flex flex-col items-center">
-          <User size={48} className="text-slate-300 mb-4" />
-          <h3 className="heading-fun text-xl font-bold text-slate-700 dark:text-slate-200 mb-1">
-            No children registered yet
-          </h3>
-          <p className="text-slate-500 text-sm max-w-xs mx-auto mb-6">
-            Add your child's profile to begin evaluations and unlock growth modules.
+        <div style={{ background: '#fff', border: '2px dashed #e2e8f0', borderRadius: 24, padding: 48, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <User size={48} color="#cbd5e1" style={{ marginBottom: 16 }} />
+          <h3 style={{ fontSize: 20, fontWeight: 800, color: '#334155', margin: '0 0 4px' }}>No children registered yet</h3>
+          <p style={{ color: '#64748b', fontSize: 14, maxWidth: 320, margin: '0 0 24px' }}>
+            Add your child&apos;s profile to begin evaluations and unlock growth modules.
           </p>
-          <Link href="/child/add" className="btn-premium btn-premium-primary text-sm font-bold flex items-center gap-1">
+          <Link href="/child/add" style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)', color: '#fff', padding: '12px 22px', borderRadius: 14, fontWeight: 700, fontSize: 14, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <Plus size={16} /> Add My First Child
           </Link>
         </div>
       ) : (
-        <div className="space-y-6">
-          {/* Child Tabs */}
-          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none border-b border-slate-100 dark:border-slate-800">
-            {childrenList.map((c) => {
-              const active = Number(c.id) === selectedCid;
-              const age = calcAgeYears(c.dob);
-              const initials = c.name ? c.name.substring(0, 1).toUpperCase() : '?';
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>
+          {/* ── LEFT: Children list ── */}
+          <aside style={{ flex: '1 1 250px', maxWidth: 320, background: '#fff', border: '1px solid #eef0f4', borderRadius: 20, padding: 14, boxShadow: '0 2px 14px rgba(15,23,42,0.04)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px 12px' }}>
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8' }}>My Children</span>
+              <span style={{ fontSize: 11, fontWeight: 800, color: '#4f46e5', background: '#eef2ff', padding: '2px 9px', borderRadius: 99 }}>{childrenList.length}</span>
+            </div>
 
-              return (
-                <Link
-                  key={c.id}
-                  href={`/dashboard?cid=${c.id}`}
-                  className={`flex items-center gap-2 px-5 py-3 rounded-2xl border-2 transition-all shrink-0 ${
-                    active
-                      ? 'bg-indigo-600 border-indigo-600 text-white shadow-md'
-                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-indigo-300'
-                  }`}
-                >
-                  <div className={`w-8 h-8 rounded-full font-extrabold text-sm flex items-center justify-center ${active ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-750'}`}>
-                    {initials}
-                  </div>
-                  <span className="font-bold text-sm">{c.name}</span>
-                  <span className={`text-xs ${active ? 'text-white/80' : 'text-slate-400'}`}>
-                    · {age}y
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {childrenList.map((c) => {
+                const active = Number(c.id) === selectedCid;
+                const age = calcAgeYears(c.dob);
+                const initials = c.name ? c.name.substring(0, 1).toUpperCase() : '?';
+                const done = completedByChild[Number(c.id)]?.size || 0;
 
-          {/* Selected Child Detail Panel */}
-          {selectedChild && (
-            <div className="space-y-6 animate-fade-in">
-              <div className="card-premium bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <h3 className="heading-fun text-2xl font-bold text-slate-800 dark:text-slate-100">
-                    {selectedChild.name}
-                  </h3>
-                  <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                    {calcAgeYears(selectedChild.dob)} years old · {selectedChild.gender || '—'} ·{' '}
-                    <span className="font-bold text-indigo-500 uppercase">
-                      {getAgeBand(calcAgeYears(selectedChild.dob))}
-                    </span>
-                    {selectedChild.class_grade && ` · Grade ${selectedChild.class_grade}`}
-                  </p>
-                  {selectedChild.diagnosis && (
-                    <p className="text-xs text-rose-650 dark:text-rose-400 mt-1 font-semibold">
-                      Known diagnosis: {selectedChild.diagnosis}
-                    </p>
-                  )}
-                </div>
-                <div className="flex gap-2">
+                return (
                   <Link
-                    href={`/child/${selectedChild.id}`}
-                    className="btn-premium btn-premium-primary text-xs font-bold py-2 px-4 shadow-sm"
+                    key={c.id}
+                    href={`/dashboard?cid=${c.id}`}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 14,
+                      textDecoration: 'none', transition: 'background 0.15s',
+                      background: active ? 'linear-gradient(135deg, #4f46e5, #7c3aed)' : 'transparent',
+                      boxShadow: active ? '0 6px 16px rgba(99,102,241,0.30)' : 'none',
+                    }}
                   >
-                    View Details
-                  </Link>
-                </div>
-              </div>
-
-              {/* Premium Voice-Led Clinical Diagnostics */}
-              <div className="space-y-4">
-                <h4 className="heading-fun text-lg font-bold text-slate-800 dark:text-slate-205 flex items-center gap-2">
-                  <Sparkles className="text-indigo-600 animate-pulse" size={20} />
-                  Premium Clinical Assessments
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Speech Evaluation Card */}
-                  <div className="bg-gradient-to-br from-indigo-50/50 to-white dark:from-slate-900 dark:to-slate-950 border-2 border-indigo-100/60 dark:border-slate-800 rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
-                    <div>
-                      <div className="flex justify-between items-start gap-2 mb-2">
-                        <div className="flex items-center gap-2">
-                          <Mic className="text-indigo-650" size={24} />
-                          <h5 className="font-bold text-slate-800 dark:text-slate-100 text-sm sm:text-base">
-                            Speech & Language Evaluation
-                          </h5>
-                        </div>
-                        <span className="bg-indigo-100 dark:bg-slate-850 text-indigo-700 dark:text-indigo-400 font-extrabold text-[10px] px-2 py-0.5 rounded-full">
-                          Premium
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
-                        Voice-led adaptive conversation (~5 mins) evaluating articulation, fluency, and processing with real-time Claude analysis.
-                      </p>
+                    <div style={{
+                      width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontWeight: 900, fontSize: 16,
+                      background: active ? 'rgba(255,255,255,0.22)' : '#eef2ff',
+                      color: active ? '#fff' : '#4f46e5',
+                    }}>
+                      {initials}
                     </div>
-                    <div className="pt-2">
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 800, fontSize: 14, color: active ? '#fff' : '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {c.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: active ? 'rgba(255,255,255,0.85)' : '#94a3b8', marginTop: 1 }}>
+                        {age}y{c.class_grade ? ` · Grade ${c.class_grade}` : ''} · {done}/{TOTAL_MODULES} done
+                      </div>
+                    </div>
+                    {active && <ChevronRight size={16} color="rgba(255,255,255,0.85)" style={{ flexShrink: 0 }} />}
+                  </Link>
+                );
+              })}
+            </div>
+
+            <Link
+              href="/child/add"
+              style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 12px', borderRadius: 14, border: '1.5px dashed #d8dce4', color: '#94a3b8', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}
+            >
+              <Plus size={15} /> Add Child
+            </Link>
+          </aside>
+
+          {/* ── RIGHT: Selected child ── */}
+          <div style={{ flex: '600 1 400px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 24 }}>
+            {selectedChild && (
+              <>
+                {/* Child Summary Card */}
+                <div style={{ background: '#fff', borderRadius: 22, border: '1px solid #eef0f4', overflow: 'hidden', boxShadow: '0 4px 24px rgba(99,102,241,0.07)' }}>
+                  <div style={{ height: 5, background: 'linear-gradient(90deg, #4f46e5, #7c3aed)' }} />
+                  <div style={{ padding: 26, display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                      <div style={{ width: 60, height: 60, borderRadius: '50%', background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 900, fontSize: 24, boxShadow: '0 6px 16px rgba(99,102,241,0.35)', flexShrink: 0 }}>
+                        {selectedChild.name?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <div>
+                        <h3 style={{ fontSize: 21, fontWeight: 900, color: '#1e293b', margin: 0, letterSpacing: '-0.01em' }}>{selectedChild.name}</h3>
+                        <p style={{ margin: '5px 0 0', fontSize: 13, color: '#64748b' }}>
+                          {calcAgeYears(selectedChild.dob)} yrs · {selectedChild.gender || '—'}
+                          {selectedChild.class_grade && <> · <span style={{ color: '#6d28d9', fontWeight: 700 }}>Grade {selectedChild.class_grade}</span></>}
+                        </p>
+                        {selectedChild.diagnosis && (
+                          <p style={{ margin: '5px 0 0', fontSize: 12, color: '#dc2626', fontWeight: 700 }}>Diagnosis: {selectedChild.diagnosis}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Modules Completed</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ width: 130, height: 6, background: '#eef0f4', borderRadius: 99, overflow: 'hidden' }}>
+                            <div style={{ width: `${selectedPct}%`, height: '100%', background: 'linear-gradient(90deg, #4f46e5, #7c3aed)', borderRadius: 99 }} />
+                          </div>
+                          <span style={{ fontSize: 13, fontWeight: 900, color: '#4f46e5' }}>{selectedDoneCount}/{TOTAL_MODULES}</span>
+                        </div>
+                      </div>
+                      <Link
+                        href={`/child/${selectedChild.id}`}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'linear-gradient(135deg, #4f46e5, #6366f1)', color: '#fff', padding: '11px 20px', borderRadius: 13, fontWeight: 700, fontSize: 14, textDecoration: 'none', boxShadow: '0 4px 14px rgba(99,102,241,0.35)' }}
+                      >
+                        View Profile &amp; Modules <ArrowRight size={15} />
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Premium Clinical Assessments */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <h4 style={{ fontSize: 17, fontWeight: 800, color: '#1e293b', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Sparkles color="#4f46e5" size={19} /> Premium Clinical Assessments
+                  </h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+                    {/* Speech Evaluation Card */}
+                    <div style={{ background: '#fff', border: '1px solid #e7e9f0', borderRadius: 20, padding: 20, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 14, boxShadow: '0 2px 14px rgba(15,23,42,0.04)' }}>
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Mic color="#6366f1" size={22} />
+                            <h5 style={{ fontWeight: 800, color: '#1e293b', fontSize: 15, margin: 0 }}>Speech &amp; Language</h5>
+                          </div>
+                          <span style={{ background: '#eef2ff', color: '#4338ca', fontWeight: 800, fontSize: 10, padding: '3px 8px', borderRadius: 99 }}>Premium</span>
+                        </div>
+                        <p style={{ fontSize: 12, color: '#64748b', lineHeight: 1.6, margin: 0 }}>
+                          Voice-led adaptive conversation (~5 mins) evaluating articulation, fluency, and processing with real-time AI analysis.
+                        </p>
+                      </div>
                       {speechCompleted ? (
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-emerald-650 dark:text-emerald-400 font-bold flex items-center gap-1">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
+                          <span style={{ color: '#059669', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
                             <Check size={14} /> Level L{speechCompleted.final_level} ({speechCompleted.final_pct}%)
                           </span>
-                          <div className="flex gap-2">
-                            <Link
-                              href={`/eval-speech/${selectedChild.id}`}
-                              className="text-indigo-600 font-bold hover:underline"
-                            >
-                              Report
-                            </Link>
-                          </div>
+                          <Link href={`/eval-speech/${selectedChild.id}`} style={{ color: '#4f46e5', fontWeight: 700, textDecoration: 'none' }}>Report</Link>
                         </div>
                       ) : (
-                        <Link
-                          href={`/eval-speech/${selectedChild.id}`}
-                          className="block text-center bg-indigo-650 text-white text-xs font-bold py-2.5 rounded-xl shadow-sm hover:opacity-90 transition-opacity"
-                        >
+                        <Link href={`/eval-speech/${selectedChild.id}`} style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', color: '#fff', fontSize: 13, fontWeight: 700, padding: '11px', borderRadius: 12, textDecoration: 'none' }}>
                           Start Speech Eval (₹1,000)
                         </Link>
                       )}
                     </div>
-                  </div>
 
-                  {/* Parent Reflection Card */}
-                  <div className="bg-gradient-to-br from-indigo-50/50 to-white dark:from-slate-900 dark:to-slate-950 border-2 border-indigo-100/60 dark:border-slate-800 rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
-                    <div>
-                      <div className="flex justify-between items-start gap-2 mb-2">
-                        <div className="flex items-center gap-2">
-                          <HeartHandshake className="text-indigo-650" size={24} />
-                          <h5 className="font-bold text-slate-800 dark:text-slate-100 text-sm sm:text-base">
-                            Parent Reflection Interview
-                          </h5>
+                    {/* Parent Reflection Card */}
+                    <div style={{ background: '#fff', border: '1px solid #e7e9f0', borderRadius: 20, padding: 20, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 14, boxShadow: '0 2px 14px rgba(15,23,42,0.04)' }}>
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <HeartHandshake color="#6366f1" size={22} />
+                            <h5 style={{ fontWeight: 800, color: '#1e293b', fontSize: 15, margin: 0 }}>Parent Reflection</h5>
+                          </div>
+                          <span style={{ background: '#eef2ff', color: '#4338ca', fontWeight: 800, fontSize: 10, padding: '3px 8px', borderRadius: 99 }}>Premium</span>
                         </div>
-                        <span className="bg-indigo-100 dark:bg-slate-850 text-indigo-700 dark:text-indigo-400 font-extrabold text-[10px] px-2 py-0.5 rounded-full">
-                          Premium
-                        </span>
+                        <p style={{ fontSize: 12, color: '#64748b', lineHeight: 1.6, margin: 0 }}>
+                          15-min guided parenting burden check-in. Includes written clinical reflection and a psychologist callback.
+                        </p>
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
-                        15-min guided parenting burden check-in. Includes written clinical reflection and psychologist callback.
-                      </p>
-                    </div>
-                    <div className="pt-2">
                       {reflectCompleted ? (
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-emerald-650 dark:text-emerald-400 font-bold flex items-center gap-1">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
+                          <span style={{ color: '#059669', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
                             <Check size={14} /> Callback Scheduled
                           </span>
-                          <Link
-                            href="/parent-reflect"
-                            className="text-indigo-600 font-bold hover:underline"
-                          >
-                            View Report
-                          </Link>
+                          <Link href="/parent-reflect" style={{ color: '#4f46e5', fontWeight: 700, textDecoration: 'none' }}>View Report</Link>
                         </div>
                       ) : (
-                        <Link
-                          href="/parent-reflect"
-                          className="block text-center bg-indigo-650 text-white text-xs font-bold py-2.5 rounded-xl shadow-sm hover:opacity-90 transition-opacity"
-                        >
+                        <Link href="/parent-reflect" style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', color: '#fff', fontSize: 13, fontWeight: 700, padding: '11px', borderRadius: 12, textDecoration: 'none' }}>
                           Start Reflection (₹1,000)
                         </Link>
                       )}
                     </div>
                   </div>
                 </div>
-              </div>
-
-              {/* Assessment Modules Grid */}
-              <div className="space-y-4">
-                <h4 className="heading-fun text-lg font-bold text-slate-800 dark:text-slate-200">
-                  Assessment Modules
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  {allModules.map((m) => {
-                    const completed = assessmentsList.find((a) => a.module === m.key && a.status === 'completed');
-                    const IconComponent = m.icon;
-
-                    return (
-                      <div
-                        key={m.key}
-                        className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/60 rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2 mb-2">
-                            <IconComponent className="text-indigo-650" size={24} />
-                            <h5 className="font-bold text-slate-800 dark:text-slate-100 text-sm sm:text-base">
-                              {m.label}
-                            </h5>
-                          </div>
-                          <p className="text-xs text-slate-400 dark:text-slate-500 leading-relaxed mb-4">
-                            {m.desc}
-                          </p>
-                        </div>
-                        <div className="pt-2">
-                          {completed ? (
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-emerald-650 dark:text-emerald-400 font-bold flex items-center gap-1">
-                                <Check size={14} /> Done · {completed.score}/100
-                              </span>
-                              <Link
-                                href={`/eval/${selectedChild.id}/${m.key}`}
-                                className="text-indigo-500 font-bold hover:underline"
-                              >
-                                Re-do
-                              </Link>
-                            </div>
-                          ) : (
-                            <Link
-                              href={`/eval/${selectedChild.id}/${m.key}`}
-                              className="block text-center bg-indigo-600 text-white text-xs font-bold py-2 rounded-xl shadow-sm hover:opacity-90 transition-opacity"
-                            >
-                              Start Module
-                            </Link>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -235,3 +235,24 @@ export async function logoutAction(): Promise<{ ok: boolean }> {
   await supabase.auth.signOut();
   return { ok: true };
 }
+
+export async function getUserCreditsAction(): Promise<{ ok: boolean; credits?: number; role?: string; name?: string }> {
+  try {
+    const supabase = await createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { ok: false };
+    
+    const role = user.user_metadata?.role || 'parent';
+    const db = createAdminClient();
+    
+    if (role === 'partner') {
+      const { data } = await db.from('partners').select('name').eq('id', user.id).maybeSingle();
+      return { ok: true, credits: 0, role, name: data?.name || user.user_metadata?.name || 'Partner' };
+    } else {
+      const { data } = await db.from('parents').select('credits, name').eq('id', user.id).maybeSingle();
+      return { ok: true, credits: data?.credits || 0, role, name: data?.name || user.user_metadata?.name || 'Parent' };
+    }
+  } catch (err) {
+    return { ok: false };
+  }
+}

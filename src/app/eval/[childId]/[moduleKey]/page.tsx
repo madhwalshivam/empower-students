@@ -40,11 +40,43 @@ export default async function EvalPage({ params }: PageProps) {
     redirect('/dashboard');
   }
 
+  // Cost + balance, so the parent sees the price BEFORE starting the module.
+  const { data: priceRow } = await db
+    .from('service_prices')
+    .select('price, is_active')
+    .eq('service_key', moduleKey)
+    .maybeSingle();
+  const { data: parent } = await db
+    .from('parents')
+    .select('credits')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  const price = priceRow?.price ?? 0;
+  const balance = parent?.credits ?? 0;
+
+  // Is there an in-progress session to RESUME? (started within the last 24h)
+  // If so, the intro shows "Resume" and won't show a deduction note — resuming
+  // is free (already paid) and continues from the same pending question.
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: openSession } = await db
+    .from('child_eval_sessions')
+    .select('id')
+    .eq('child_id', childId)
+    .eq('module', moduleKey)
+    .eq('status', 'in_progress')
+    .gt('started_at', oneDayAgo)
+    .limit(1)
+    .maybeSingle();
+
   return (
     <EvalClient
       childId={childId}
       moduleKey={moduleKey}
       childName={child.name}
+      price={price}
+      balance={balance}
+      resuming={!!openSession}
     />
   );
 }

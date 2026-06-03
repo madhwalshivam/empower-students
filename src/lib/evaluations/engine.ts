@@ -1,14 +1,25 @@
-import { createClient } from '@/lib/supabase/client';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { claudeChat } from '@/lib/claude/client';
 import { getModuleConfig, cleanPrompt } from './modules';
 
+// Per-turn question generation and answer scoring run on a FAST model (Haiku) —
+// these are simple, well-scoped JSON tasks and don't need a heavyweight model.
+// This roughly halves the wait between questions. The final report still uses the
+// default (stronger) model for quality. Override via ANTHROPIC_FAST_MODEL.
+const FAST_MODEL = process.env.ANTHROPIC_FAST_MODEL || 'claude-haiku-4-5-20251001';
+
 // Custom OTP and auth helpers
 export function calcAgeYears(dobString: string): number {
   try {
+    if (!dobString) return 7.0;
     const dob = new Date(dobString);
-    const diffMs = Date.now() - dob.getTime();
-    return Math.round((diffMs / (1000 * 60 * 60 * 24 * 365.25)) * 10) / 10;
+    const ms = dob.getTime();
+    // new Date('garbage') does NOT throw — it yields NaN. Guard it explicitly,
+    // otherwise the age silently becomes NaN and every prompt reads "NaN years".
+    if (isNaN(ms)) return 7.0;
+    const years = Math.round(((Date.now() - ms) / (1000 * 60 * 60 * 24 * 365.25)) * 10) / 10;
+    if (!isFinite(years) || years <= 0 || years > 25) return 7.0;
+    return years;
   } catch {
     return 7.0;
   }
@@ -22,7 +33,7 @@ export function getAgeBand(years: number): string {
   return 'teen';
 }
 
-export async function ceStartSession(childId: number, moduleKey: string): Promise<number> {
+export async function ceStartSession(childId: number, moduleKey: string): Promise<{ sessionId: number; created: boolean }> {
   const supabase = createAdminClient();
 
   // 1. Check if there's an in-progress session started within the last 24 hours
@@ -39,7 +50,7 @@ export async function ceStartSession(childId: number, moduleKey: string): Promis
     .maybeSingle();
 
   if (existing) {
-    return Number(existing.id);
+    return { sessionId: Number(existing.id), created: false };
   }
 
   // 2. Fetch child DOB
@@ -76,10 +87,18 @@ export async function ceStartSession(childId: number, moduleKey: string): Promis
     throw new Error(`Failed to start evaluation session: ${createError?.message}`);
   }
 
-  return Number(newSession.id);
+  return { sessionId: Number(newSession.id), created: true };
 }
 
-export async function ceGenerateNextQuestion(sessionId: number): Promise<any> {
+// Resolve the output language for AI text. The navbar EN/हिं toggle (lang)
+// takes priority; otherwise fall back to the child's mother tongue.
+function resolveOutputLang(lang: string | undefined, motherTongue: string): string {
+  if (lang === 'hi') return 'Hindi (Devanagari script)';
+  if (lang === 'en') return 'English';
+  return motherTongue || 'English';
+}
+
+export async function ceGenerateNextQuestion(sessionId: number, lang?: string): Promise<any> {
   const supabase = createAdminClient();
 
   // Load Session and Child Info
@@ -90,7 +109,8 @@ export async function ceGenerateNextQuestion(sessionId: number): Promise<any> {
       children (
         name,
         dob,
-        mother_tongue
+        mother_tongue,
+        class_grade
       )
     `)
     .eq('id', sessionId)
@@ -112,8 +132,28 @@ export async function ceGenerateNextQuestion(sessionId: number): Promise<any> {
     .order('turn_no', { ascending: true });
 
   const activeTurns = turns || [];
-  const nextTurnNo = activeTurns.length + 1;
   const targetTurns = session.target_turns;
+
+  // IDEMPOTENT: if a question was already generated but NOT yet answered, return
+  // that SAME question. This means a reload (or resuming the session) shows the
+  // exact same pending question instead of calling the AI again — saving API
+  // tokens, and never generating a new question until the current one is submitted.
+  const pendingTurn = activeTurns.find((t: any) => !t.answer_json);
+  if (pendingTurn) {
+    let pendingQ: any = {};
+    try { pendingQ = JSON.parse(pendingTurn.question_json || '{}'); } catch { /* keep {} */ }
+    return {
+      ok: true,
+      turn_no: pendingTurn.turn_no,
+      total: targetTurns,
+      axis: pendingTurn.axis,
+      difficulty: pendingTurn.difficulty,
+      question: pendingQ,
+      resumed: true,
+    };
+  }
+
+  const nextTurnNo = activeTurns.length + 1;
 
   if (nextTurnNo > targetTurns) {
     return { ok: true, done: true, message: 'All turns complete' };
@@ -125,13 +165,17 @@ export async function ceGenerateNextQuestion(sessionId: number): Promise<any> {
   const childName = session.children?.name || 'Child';
   // @ts-ignore
   const motherTongue = session.children?.mother_tongue || 'English';
+  // @ts-ignore
+  const classGrade = session.children?.class_grade || '';
   const cfg = getModuleConfig(moduleKey, age);
 
   // Analyze history & determine next axis/difficulty
   let historySummary = '';
   const axesCovered: Record<string, number> = {};
   let correctStreak = 0;
-  let lastDifficulty = 3;
+  let wrongStreak = 0;
+  let lastDifficulty = 0;
+  let lastWasCorrect: boolean | null = null;
 
   for (const t of activeTurns) {
     const q = JSON.parse(t.question_json || '{}');
@@ -144,8 +188,12 @@ export async function ceGenerateNextQuestion(sessionId: number): Promise<any> {
     lastDifficulty = t.difficulty;
     if (t.is_correct) {
       correctStreak++;
+      wrongStreak = 0;
+      lastWasCorrect = true;
     } else {
+      wrongStreak++;
       correctStreak = 0;
+      lastWasCorrect = false;
     }
   }
 
@@ -159,33 +207,65 @@ export async function ceGenerateNextQuestion(sessionId: number): Promise<any> {
   const sortedAxes = Object.entries(axisCounts).sort((a, b) => a[1] - b[1]);
   const nextAxis = sortedAxes[0][0];
 
-  // Calibrate difficulty
-  let nextDifficulty = lastDifficulty;
-  if (correctStreak >= 2) {
-    nextDifficulty = Math.min(5, lastDifficulty + 1);
-  }
-  if (activeTurns.length >= 2) {
-    const lastTwoCorrect = (activeTurns[activeTurns.length - 1].is_correct ? 1 : 0) +
-                           (activeTurns[activeTurns.length - 2].is_correct ? 1 : 0);
-    if (lastTwoCorrect === 0) {
-      nextDifficulty = Math.max(1, lastDifficulty - 1);
+  // Calibrate difficulty — a responsive staircase (1..5, relative to the child's
+  // age). Every CORRECT answer makes the next question harder; every WRONG one
+  // makes it easier. Consecutive runs move faster so the test homes in quickly.
+  // Questionnaire modules (health, diet) are non-adaptive: difficulty is fixed.
+  const isAdaptive = cfg.adaptive !== false;
+  let nextDifficulty: number;
+  if (!isAdaptive) {
+    nextDifficulty = 3;
+  } else if (activeTurns.length === 0) {
+    nextDifficulty = 2; // gentle warm-up; climbs fast if the child is doing well
+  } else {
+    nextDifficulty = lastDifficulty || 3;
+    if (lastWasCorrect) {
+      nextDifficulty += correctStreak >= 3 ? 2 : 1;
+    } else {
+      nextDifficulty -= wrongStreak >= 2 ? 2 : 1;
     }
+    nextDifficulty = Math.max(1, Math.min(5, nextDifficulty));
   }
 
+  const diffLabels: Record<number, string> = {
+    1: 'VERY EASY for this age — a warm-up almost every child this age gets right',
+    2: 'EASY for this age',
+    3: 'MEDIUM — typical for a child of exactly this age/grade',
+    4: 'HARD for this age — stretches a strong child',
+    5: 'VERY HARD for this age — only an advanced child this age would solve it',
+  };
+
+  const outLang = resolveOutputLang(lang, motherTongue);
+
   let systemPrompt = cfg.system_prompt;
-  systemPrompt += `\n\nChild details:\n  Name: ${childName}\n  Age: ${age} years\n  Age band: ${getAgeBand(age)}\n  Mother tongue: ${motherTongue}\n`;
-  systemPrompt += `\nThis is turn ${nextTurnNo} of ${targetTurns}.\nProbe this axis: ${nextAxis} (description: ${cfg.axes[nextAxis]?.desc || ''})\nTarget difficulty: ${nextDifficulty} (1=very easy, 5=very hard for age).\n`;
+  systemPrompt += `\n\nCHILD PROFILE — calibrate every question to THIS child:\n  Name: ${childName}\n  Age: ${age} years (age band: ${getAgeBand(age)})\n`;
+  if (classGrade) systemPrompt += `  School grade/class: ${classGrade}\n`;
+  systemPrompt += `  Mother tongue: ${motherTongue}\n`;
+  systemPrompt += `\nOUTPUT LANGUAGE: Write EVERYTHING the child sees — the prompt, the stimulus, and EVERY option — in ${outLang}. Do not mix in the other language.\n`;
+  systemPrompt += `\nThis is question ${nextTurnNo} of ${targetTurns}.\nProbe this axis: ${nextAxis} (${cfg.axes[nextAxis]?.desc || ''}).\n`;
+
+  if (isAdaptive) {
+    systemPrompt += `TARGET DIFFICULTY: ${nextDifficulty}/5 — ${diffLabels[nextDifficulty]}.\n`;
+    systemPrompt += `Difficulty is RELATIVE to a ${age}-year-old${classGrade ? ` in grade ${classGrade}` : ''}. Genuinely match this level — do NOT default to medium.\n`;
+
+    if (lastWasCorrect === true) {
+      systemPrompt += `The child answered the PREVIOUS question CORRECTLY → this question MUST be clearly HARDER than the last.\n`;
+    } else if (lastWasCorrect === false) {
+      systemPrompt += `The child got the PREVIOUS question WRONG → this question MUST be clearly EASIER than the last to rebuild confidence.\n`;
+    }
+  }
+  systemPrompt += `Do NOT repeat or lightly reword any question already asked below.\n`;
 
   if (historySummary) {
     systemPrompt += `\nConversation so far:\n${historySummary}`;
   }
 
-  const responseText = await claudeChat(
-    systemPrompt,
-    [{ role: 'user', content: cfg.question_user_prompt }],
-    800,
-    0.7
-  );
+  const genMessages = [{ role: 'user' as const, content: cfg.question_user_prompt }];
+  let responseText = await claudeChat(systemPrompt, genMessages, 700, 0.7, FAST_MODEL);
+  // Fallback to the default model if the fast model is unavailable / returns empty.
+  if (!responseText) {
+    responseText = await claudeChat(systemPrompt, genMessages, 700, 0.7);
+  }
 
   let clean = responseText.trim();
   if (clean.includes('```')) {
@@ -272,7 +352,8 @@ export async function ceGenerateNextQuestion(sessionId: number): Promise<any> {
 
 export async function ceSubmitAnswer(
   sessionId: number,
-  answerPayload: { text?: string; choice?: string; response_seconds?: number }
+  answerPayload: { text?: string; choice?: string; response_seconds?: number },
+  lang?: string
 ): Promise<any> {
   const supabase = createAdminClient();
 
@@ -314,15 +395,18 @@ export async function ceSubmitAnswer(
   // Score via Claude
   let systemPrompt = cfg.scoring_system_prompt || "You are an evaluator for a child cognitive test. Score the child's answer fairly.";
   systemPrompt += `\n\nChild's age: ${age} years.\nQuestion axis: ${axis}\nQuestion difficulty: ${turn.difficulty}/5\n`;
+  if (lang === 'hi' || lang === 'en') {
+    systemPrompt += `Write "feedback_for_child" in ${lang === 'hi' ? 'Hindi (Devanagari script)' : 'English'}.\n`;
+  }
 
   const userContent = `Question asked:\n${JSON.stringify(qObj)}\n\nChild's answer:\n${JSON.stringify(answerPayload)}\n\nScore it. Output JSON only:\n{ "is_correct": true|false, "score_0_100": 0-100, "feedback_for_child": "kind feedback", "insight_for_report": "parent report insight" }`;
 
-  const responseText = await claudeChat(
-    systemPrompt,
-    [{ role: 'user', content: userContent }],
-    500,
-    0.3
-  );
+  const scoreMessages = [{ role: 'user' as const, content: userContent }];
+  let responseText = await claudeChat(systemPrompt, scoreMessages, 400, 0.3, FAST_MODEL);
+  // Fallback to the default model if the fast model is unavailable / returns empty.
+  if (!responseText) {
+    responseText = await claudeChat(systemPrompt, scoreMessages, 400, 0.3);
+  }
 
   let clean = responseText.trim();
   if (clean.includes('```')) {
@@ -347,7 +431,13 @@ export async function ceSubmitAnswer(
     }
   }
 
-  const isCorrect = !!scoreObj.is_correct;
+  // Coerce robustly: the model occasionally returns is_correct as the STRING
+  // "false"/"true", and !"false" would wrongly read as correct — which would
+  // break the adaptive staircase (a wrong answer must register as wrong).
+  const rawCorrect = scoreObj.is_correct;
+  const isCorrect = typeof rawCorrect === 'string'
+    ? rawCorrect.trim().toLowerCase() === 'true'
+    : !!rawCorrect;
   const score = Math.max(0, Math.min(100, Number(scoreObj.score_0_100 || 50)));
   const feedback = scoreObj.feedback_for_child || '';
 
@@ -416,7 +506,7 @@ export async function ceSubmitAnswer(
   };
 }
 
-export async function ceFinaliseSession(sessionId: number): Promise<any> {
+export async function ceFinaliseSession(sessionId: number, lang?: string): Promise<any> {
   const supabase = createAdminClient();
 
   // Load session
@@ -492,6 +582,9 @@ export async function ceFinaliseSession(sessionId: number): Promise<any> {
   // Ask Claude for the final report
   let systemPrompt = cfg.report_system_prompt || "You are a child psychologist writing a 1-page evaluation report for the parent.";
   systemPrompt += `\n\nChild: ${childName}, age ${age} years.\nModule: ${moduleKey}.\nOverall score: ${overallScore}/100.\n\nPer-axis performance:\n`;
+  if (lang === 'hi' || lang === 'en') {
+    systemPrompt += `\nWRITE THE ENTIRE REPORT (summary, strengths, gaps, recommended_focus) in ${lang === 'hi' ? 'Hindi (Devanagari script)' : 'English'}.\n`;
+  }
 
   Object.entries(axisData).forEach(([axis, d]: [string, any]) => {
     const avg = d.count > 0 ? Math.round(d.scoreSum / d.count) : 0;

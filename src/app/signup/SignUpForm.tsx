@@ -48,15 +48,15 @@ export default function SignUpForm() {
       );
 
       if (res.ok) {
-        setSuccess('Account created successfully! Redirecting...');
+        if (role === 'partner') {
+          setSuccess('Registration request sent successfully! You can log in once the admin approves your account. Redirecting to login page...');
+        } else {
+          setSuccess('Account created successfully! Redirecting to login page...');
+        }
         setTimeout(() => {
-          if (role === 'partner') {
-            router.push('/partner/dashboard');
-          } else {
-            router.push('/dashboard');
-          }
+          router.push('/login');
           router.refresh();
-        }, 1000);
+        }, 4000);
       } else {
         setError(res.error || 'Sign up failed. Please try again.');
       }

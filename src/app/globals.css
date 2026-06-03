@@ -566,6 +566,14 @@ a {
 .es-admin-hamburger:hover { background: #f1f5f9; }
 @media (max-width: 1023px) { .es-admin-hamburger { display: inline-flex; } }
 
+/* Mobile header: tighter padding/gaps and a compact credits pill so nothing
+   overflows or wraps on small screens. */
+@media (max-width: 640px) {
+  .es-admin-header { padding: 0 12px; gap: 8px; }
+  .es-admin-header h1 { font-size: 16px !important; }
+  .es-credits-pill { padding: 6px 12px !important; }
+}
+
 .es-admin-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, .6); backdrop-filter: blur(4px); z-index: 50; }
 .es-admin-drawer { position: fixed; top: 0; left: 0; bottom: 0; width: 256px; background: #0f172a; z-index: 51; display: flex; flex-direction: column; box-shadow: 0 20px 40px rgba(0,0,0,.4); }
 

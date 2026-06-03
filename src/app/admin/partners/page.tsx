@@ -6,6 +6,7 @@ import { requireAdminUser } from '@/lib/admin/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { AdminPageHeader, Card, StatCard, Badge, EmptyState } from '@/components/admin/ui';
 import CopyLinkButton from '../../partner/dashboard/CopyLinkButton';
+import PartnerRowActions from './PartnerRowActions';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,13 +88,14 @@ export default async function AdminPartnersPage({ searchParams }: { searchParams
                       <td className="px-3 py-3.5 text-slate-500">{p.city || '—'}</td>
                       <td className="px-3 py-3.5"><Badge variant={p.status || 'pending'}>{p.status || 'pending'}</Badge></td>
                       <td className="px-5 py-3.5">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-3">
                           {wa && (
                             <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" className="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-full inline-flex items-center gap-1 no-underline">
                               <MessageSquare size={12} /> WhatsApp
                             </a>
                           )}
                           {p.referral_code && <CopyLinkButton link={`${origin}/r/${p.referral_code}`} />}
+                          <PartnerRowActions partnerId={p.id} currentStatus={p.status || 'pending'} />
                         </div>
                       </td>
                     </tr>

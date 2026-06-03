@@ -41,7 +41,7 @@ export async function createTopupOrderAction(amount: number): Promise<{
       order_id: orderId,
       amount: amount,
       status: 'pending',
-      credited: false,
+      credited: 0,
     })
     .select('id')
     .single();
@@ -51,9 +51,9 @@ export async function createTopupOrderAction(amount: number): Promise<{
     return { ok: false, error: 'Failed to initialize payment transaction.' };
   }
 
-  // Construct return URL pointing to cashfree verification page
-  const origin = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-  const returnUrl = `${origin}/api/payment/verify?order_id=${orderId}`;
+  // Use the configured site URL (set NEXT_PUBLIC_SITE_URL=https://your-ngrok-url.ngrok-free.app for local testing)
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://empowerstudents.in').replace(/\/$/, '');
+  const returnUrl = `${siteUrl}/api/payment/verify?order_id=${orderId}`;
 
   try {
     const cfOrder = await cfCreateOrder({

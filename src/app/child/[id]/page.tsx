@@ -47,6 +47,16 @@ export default async function ChildDetailPage({ params }: PageProps) {
     .eq('child_id', childId)
     .eq('status', 'completed');
 
+  // Modules with an in-progress session (started in the last 24h) → show "Resume"
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: openSessions } = await db
+    .from('child_eval_sessions')
+    .select('module')
+    .eq('child_id', childId)
+    .eq('status', 'in_progress')
+    .gt('started_at', oneDayAgo);
+  const inProgressModules = Array.from(new Set((openSessions || []).map((s: any) => s.module)));
+
   // Load parent details for credit balance
   const { data: parent } = await db
     .from('parents')
@@ -68,6 +78,7 @@ export default async function ChildDetailPage({ params }: PageProps) {
       assessments={assessments || []}
       carePack={carePack || null}
       parentCredits={parent?.credits || 0}
+      inProgressModules={inProgressModules}
     />
   );
 }

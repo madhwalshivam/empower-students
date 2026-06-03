@@ -5,6 +5,11 @@ export interface EvaluationModuleAxis {
 
 export interface EvaluationModuleConfig {
   turns: number;
+  // When false, this is a screening questionnaire (e.g. health, diet) where
+  // "harder on correct / easier on wrong" makes no sense — the engine then keeps
+  // difficulty fixed and drops the adaptive pressure from the prompt. Defaults
+  // to true (a real adaptive test) when omitted.
+  adaptive?: boolean;
   axes: Record<string, EvaluationModuleAxis>;
   system_prompt: string;
   question_user_prompt: string;
@@ -13,6 +18,25 @@ export interface EvaluationModuleConfig {
 }
 
 export function getModuleConfig(moduleKey: string, age: number): EvaluationModuleConfig {
+  // Normalise module keys: the UI/dashboard use a few different slugs than the
+  // config keys below (e.g. the "Maths Level" card links to `math`, but the real
+  // adaptive config is keyed `maths`). Without this map those modules silently
+  // fell through to the generic fallback config — questions stopped being
+  // module-specific. Keep new aliases here whenever a UI slug ≠ a config key.
+  const aliases: Record<string, string> = {
+    math: 'maths',
+    mathematics: 'maths',
+    behaviour: 'behavior',
+    'general-awareness': 'general_awareness',
+    'general_knowledge': 'general_awareness',
+    gk: 'general_awareness',
+    talent: 'special_talent',
+    'special-talent': 'special_talent',
+    emotion: 'emotions',
+    'language_reading': 'language',
+  };
+  const key = aliases[moduleKey] || moduleKey;
+
   const configs: Record<string, EvaluationModuleConfig> = {
     mind_power: {
       turns: 10,
@@ -164,7 +188,7 @@ Output STRICT JSON:
 {
   "type": "mcq" | "open" | "list",
   "prompt": "the question",
-  "stimulus": "the question text again (for screen display)",
+  "stimulus": "ONLY extra content to show (e.g. a short passage or data). Leave EMPTY if the question is fully in prompt — do NOT repeat the prompt here.",
   "options": ["only for mcq"],
   "expected_answer": "what a correct/good answer would be",
   "expected_format": "text | choice | list",
@@ -342,6 +366,87 @@ For Hindi answers, accept transliteration variants.`,
 Note: if the child has Hindi mother tongue but evaluation was in English (or vice-versa), this affects scores — call this out.
 Gaps actionable: "read 1 page of a short story aloud daily" not "improve reading".`,
     },
+    health: {
+      turns: 8,
+      adaptive: false,
+      axes: {
+        growth_physical: { label: 'Growth & physical', desc: 'Height/weight trend, energy, motor coordination, vision/hearing concerns' },
+        sleep: { label: 'Sleep', desc: 'Sleep duration, routine, night waking, snoring, daytime tiredness' },
+        sensory: { label: 'Sensory', desc: 'Reactions to sound/light/touch/textures — sensitivities or seeking' },
+        milestones: { label: 'Milestones & red-flags', desc: 'Age-appropriate development, speech, social, any regression' },
+      },
+      system_prompt: `You design ONE short health-screening question for a PARENT to answer about their child. This is a SCREENING questionnaire, NOT a quiz — there are no "right" answers, you are gathering signal to spot red-flags.
+
+The PARENT answers on screen about their child. Address the PARENT ("How many hours does the child usually sleep at night?"), never the child.
+
+Question types:
+  "scale"   — a frequency/severity scale (give 4 options, ordered mild → concerning)
+  "mcq"     — pick the option that best fits
+  "yes_no"  — yes / no
+  "open"    — short free text (e.g. "Any concern about hearing or vision?")
+
+Cover age-appropriate health checkpoints and calibrate to the child's age (a 2-year-old's milestones differ from a 10-year-old's).
+SCREEN-BASED: never say "I'll ask". Honor mother tongue (English / Hindi Devanagari / Hinglish Roman).
+Output STRICT JSON only:
+{
+  "type": "scale" | "mcq" | "yes_no" | "open",
+  "prompt": "the question, addressed to the parent",
+  "stimulus": "",
+  "options": ["for scale/mcq/yes_no — ordered mild → concerning"],
+  "expected_format": "choice | text",
+  "memory_mode": false,
+  "scoring_hint": "which answers indicate a red-flag vs healthy, for this item"
+}`,
+      question_user_prompt: 'Generate the next health-screening question. JSON only.',
+      scoring_system_prompt: `You are screening a parent's answer about their child's health. There is NO right/wrong — you are rating concern level.
+Set is_correct = TRUE when the answer indicates NO concern (healthy), FALSE when it suggests a possible red-flag worth a closer look.
+score_0_100: 100 = clearly healthy, 60 = minor / age-typical, 30 = some concern, 0 = clear red-flag.
+In insight_for_report, note plainly what was reported and whether it is a red-flag. Be factual and calm — never alarm.`,
+      report_system_prompt: `Write a warm, parent-facing HEALTH SCREENING summary. Use the child's name.
+This is a SCREEN, not a diagnosis — say so clearly. Group findings by growth, sleep, sensory, milestones.
+If a genuine red-flag appeared (developmental regression, hearing/vision concern, very poor sleep, milestone delay), set safety_flag: true and gently recommend seeing a paediatrician — without scaring the parent.
+"gaps" must be specific, doable next steps (e.g. "fix a 9pm sleep routine", "book a vision check"). Hindi+English mix is fine.`,
+    },
+    diet: {
+      turns: 8,
+      adaptive: false,
+      axes: {
+        eating_habits: { label: 'Eating habits', desc: 'Meal regularity, portions, skipping meals, eating speed, screen-while-eating' },
+        food_variety: { label: 'Food variety & balance', desc: 'Fruits, vegetables, protein, whole grains vs junk/sugar/fried' },
+        hydration_sleep: { label: 'Hydration & sleep', desc: 'Water intake, sugary drinks, sleep timing affecting appetite' },
+        appetite: { label: 'Appetite & concerns', desc: 'Picky eating, low appetite, allergies, weight worries' },
+      },
+      system_prompt: `You design ONE short diet & nutrition question for a PARENT to answer about their child. This builds a food + sleep plan — it is NOT a quiz, there are no right answers.
+
+The PARENT answers on screen about their child. Address the PARENT ("How many servings of vegetables does the child eat in a day?").
+
+Question types:
+  "scale"  — frequency scale (4 options, ordered healthy → unhealthy)
+  "mcq"    — pick the best fit
+  "yes_no" — yes / no
+  "open"   — short free text (e.g. "Any food allergies?")
+
+Cover eating habits, food variety/balance, hydration, sleep timing, and appetite/allergies. Calibrate to the child's age.
+Use India-friendly food context (roti, dal, rice, fruits, milk; junk like chips/cold-drink). SCREEN-BASED. Honor mother tongue.
+Output STRICT JSON only:
+{
+  "type": "scale" | "mcq" | "yes_no" | "open",
+  "prompt": "the question, addressed to the parent",
+  "stimulus": "",
+  "options": ["for choice types — ordered healthy → unhealthy"],
+  "expected_format": "choice | text",
+  "memory_mode": false,
+  "scoring_hint": "which answers are healthy vs needs-improvement"
+}`,
+      question_user_prompt: 'Generate the next diet & nutrition question. JSON only.',
+      scoring_system_prompt: `You are reviewing a parent's answer about the child's diet. No right/wrong — gauge how healthy the habit is.
+is_correct = TRUE for a healthy habit, FALSE for one that needs improvement.
+score_0_100: 100 = healthy, 60 = okay, 30 = needs work, 0 = unhealthy.
+In insight_for_report, note the habit and the single change that would help most.`,
+      report_system_prompt: `Write a warm, parent-facing DIET & NUTRITION plan. Use the child's name.
+Deliver real value: a simple suggested daily food chart (breakfast / lunch / snack / dinner with India-friendly foods) plus a sleep-timing tip, tuned to what the parent reported.
+Frame gaps as easy swaps ("replace cold-drink with nimbu-paani"), never shaming. If a real concern appeared (severe picky eating, suspected allergy, weight worry), set safety_flag: true and suggest a paediatric/nutrition consult. Hindi+English mix is fine.`,
+    },
     special_talent: {
       turns: 10,
       axes: {
@@ -390,13 +495,28 @@ This report shouldn't include "scores" prominently — it should feel like a gif
     },
   };
 
-  return configs[moduleKey] || {
+  return configs[key] || {
     turns: 8,
     axes: { general: { label: 'General', desc: 'General assessment' } },
-    system_prompt: 'Design a child screening question.',
-    question_user_prompt: 'Generate a question.',
-    scoring_system_prompt: 'Score the answer.',
-    report_system_prompt: 'Write a report.',
+    system_prompt: `You design ONE age-appropriate, screen-based screening question for a child.
+The child reads the question on screen and types or picks an answer.
+- Honor mother tongue (English / Hindi Devanagari / Hinglish Roman).
+- Keep it simple, clear, and warm.
+- Output STRICT JSON only. No preamble, no markdown fences.
+JSON shape:
+{
+  "type": "open" | "mcq",
+  "prompt": "the question (1-2 sentences)",
+  "stimulus": "any content to show, or empty",
+  "options": ["only for mcq"],
+  "expected_answer": "what a good answer looks like",
+  "expected_format": "text | choice",
+  "memory_mode": false,
+  "time_limit_seconds": 30
+}`,
+    question_user_prompt: 'Generate the next question now. Output JSON only — no preamble, no markdown fences.',
+    scoring_system_prompt: 'Score the child\'s answer fairly and specifically. Output JSON only.',
+    report_system_prompt: 'Write a warm, parent-facing report. Frame everything as growth, never deficit.',
   };
 }
 

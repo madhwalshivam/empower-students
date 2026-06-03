@@ -16,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <link rel="icon" type="image/png" href="/assets/images/logo-small.png" />
+        <link rel="icon" type="image/png" href="/logo-small.png" />
       </head>
       <body>
         <I18nProvider>

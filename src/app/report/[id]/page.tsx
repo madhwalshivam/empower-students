@@ -50,6 +50,31 @@ export default async function ReportPage({ params }: PageProps) {
     .eq('status', 'completed')
     .order('completed_at', { ascending: false });
 
+  // Load per-module detailed reports from the adaptive engine sessions
+  const { data: evalSessions } = await db
+    .from('child_eval_sessions')
+    .select('id, module, overall_score, report_json, completed_at')
+    .eq('child_id', childId)
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false });
+
+  const seenModules = new Set<string>();
+  const moduleReports: any[] = [];
+  for (const s of evalSessions || []) {
+    if (!s.module || seenModules.has(s.module)) continue; // keep latest per module
+    let report: any = null;
+    try { report = s.report_json ? JSON.parse(s.report_json) : null; } catch { /* skip */ }
+    if (!report) continue;
+    seenModules.add(s.module);
+    moduleReports.push({
+      id: s.id,
+      module: s.module,
+      score: s.overall_score,
+      completed_at: s.completed_at,
+      report,
+    });
+  }
+
   // Load expert report status
   const { data: expertOrder } = await db
     .from('expert_report_orders')
@@ -59,10 +84,10 @@ export default async function ReportPage({ params }: PageProps) {
     .order('id', { ascending: false })
     .maybeSingle();
 
-  // Load parent credits
+  // Load parent details (for credits + form prefill)
   const { data: parent } = await db
     .from('parents')
-    .select('credits')
+    .select('credits, name, whatsapp')
     .eq('id', user.id)
     .single();
 
@@ -73,9 +98,12 @@ export default async function ReportPage({ params }: PageProps) {
     <ReportClient
       child={child}
       assessments={assessments || []}
+      moduleReports={moduleReports}
       expertOrder={expertOrder || null}
       referralStats={referralStats}
       parentCredits={parent?.credits || 0}
+      parentName={parent?.name || ''}
+      parentPhone={parent?.whatsapp || ''}
     />
   );
 }
