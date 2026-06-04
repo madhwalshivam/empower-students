@@ -1,13 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { loginAction } from '@/app/actions/email-auth';
 import { AlertTriangle, Check, Mail, Lock, Eye, EyeOff, LogIn } from 'lucide-react';
 
 export default function LoginForm() {
-  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -25,18 +23,22 @@ export default function LoginForm() {
       const res = await loginAction(email, password);
       if (res.ok) {
         setSuccess('Login successful! Redirecting...');
-        setTimeout(() => {
-          router.push(res.redirectUrl || '/dashboard');
-          router.refresh();
-        }, 800);
+        // Use a FULL-PAGE navigation, not router.push. The session cookies were
+        // just set by the server action; a client-side router.push can reuse a
+        // cached (logged-out) RSC payload for /dashboard that bounces straight
+        // back to /login — which is exactly the "login doesn't redirect" bug.
+        // A hard navigation forces a fresh server render that sees the new
+        // cookies, so the redirect always sticks. Keep `loading` true so the
+        // button stays disabled through the redirect.
+        window.location.assign(res.redirectUrl || '/dashboard');
+        return;
       } else {
         setError(res.error || 'Login failed. Please try again.');
       }
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred.');
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   return (

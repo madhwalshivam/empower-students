@@ -5,10 +5,14 @@ import { useSearchParams } from 'next/navigation';
 import Script from 'next/script';
 import { createTopupOrderAction } from '@/app/actions/payment';
 import { Coins, AlertTriangle, ArrowRight } from 'lucide-react';
+import Pagination from '@/components/Pagination';
 
 interface WalletClientProps {
   initialBalance: number;
   history: any[];
+  page: number;
+  total: number;
+  pageSize: number;
 }
 
 declare global {
@@ -17,7 +21,7 @@ declare global {
   }
 }
 
-export default function WalletClient({ initialBalance, history }: WalletClientProps) {
+export default function WalletClient({ initialBalance, history, page, total, pageSize }: WalletClientProps) {
   const searchParams = useSearchParams();
   const status = searchParams.get('status');
   const errorParam = searchParams.get('error');
@@ -196,6 +200,7 @@ export default function WalletClient({ initialBalance, history }: WalletClientPr
                 })}
               </tbody>
             </table>
+            <Pagination page={page} total={total} pageSize={pageSize} basePath="/wallet" />
           </div>
         )}
       </div>

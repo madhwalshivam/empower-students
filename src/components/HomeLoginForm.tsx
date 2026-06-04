@@ -1,13 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { loginAction } from '@/app/actions/email-auth';
 import { AlertTriangle, Check, Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
 
 export default function HomeLoginForm() {
-  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -25,18 +23,18 @@ export default function HomeLoginForm() {
       const res = await loginAction(email, password);
       if (res.ok) {
         setSuccess('Login successful! Redirecting...');
-        setTimeout(() => {
-          router.push(res.redirectUrl || '/dashboard');
-          router.refresh();
-        }, 800);
+        // Full-page navigation so the freshly-set session cookies are sent on
+        // the next request — a client router.push can bounce back to /login by
+        // reusing a cached logged-out RSC payload.
+        window.location.assign(res.redirectUrl || '/dashboard');
+        return;
       } else {
         setError(res.error || 'Login failed. Please try again.');
       }
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred.');
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   return (

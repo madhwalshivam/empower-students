@@ -4,47 +4,68 @@ import { Users, Search, ArrowRight, Crown } from 'lucide-react';
 import { requireAdminUser } from '@/lib/admin/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { AdminPageHeader, Card, EmptyState, inr, fmtDate } from '@/components/admin/ui';
+import Pagination, { parsePage } from '@/components/Pagination';
 
 export const dynamic = 'force-dynamic';
 
-export default async function AdminParentsPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+const PAGE_SIZE = 20;
+
+export default async function AdminParentsPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
   await requireAdminUser();
-  const { q } = await searchParams;
-  const query = (q || '').trim().toLowerCase();
+  const { q, page: pageRaw } = await searchParams;
+  const query = (q || '').trim();
+  // Strip characters that would break the PostgREST .or() filter syntax.
+  const safeQ = query.replace(/[%,()]/g, ' ').trim();
+  const page = parsePage(pageRaw);
   const db = createAdminClient();
 
-  const [{ data: parents }, { data: children }, { data: assessments }, { data: payments }] = await Promise.all([
-    db.from('parents').select('*').order('created_at', { ascending: false }),
-    db.from('children').select('id, parent_id'),
-    db.from('assessments').select('child_id, status'),
-    db.from('payment_orders').select('parent_id, amount, status'),
-  ]);
+  // Fetch ONLY the current page of parents (with an exact count of the full
+  // filtered set). Search is pushed down to the DB via ilike.
+  const fromIdx = (page - 1) * PAGE_SIZE;
+  let listQuery = db.from('parents').select('*', { count: 'exact' }).order('created_at', { ascending: false });
+  if (safeQ) {
+    listQuery = listQuery.or(
+      `name.ilike.%${safeQ}%,whatsapp.ilike.%${safeQ}%,email.ilike.%${safeQ}%,city.ilike.%${safeQ}%`
+    );
+  }
+  const { data: parents, count } = await listQuery.range(fromIdx, fromIdx + PAGE_SIZE - 1);
+  const rows = parents || [];
+  const total = count || 0;
 
+  // Aggregates (kids / done / revenue) are computed ONLY for the parents on this
+  // page — scoped with .in() — so we never scan the whole children / assessments
+  // / payments tables.
+  const parentIds = rows.map((p) => p.id);
   const childByParent = new Map<string, number>();
   const childToParent = new Map<number, string>();
-  (children || []).forEach((c) => {
-    childByParent.set(c.parent_id, (childByParent.get(c.parent_id) || 0) + 1);
-    childToParent.set(c.id, c.parent_id);
-  });
-
   const doneByParent = new Map<string, number>();
-  (assessments || []).forEach((a) => {
-    if (a.status === 'completed' || a.status === 'done') {
-      const pid = childToParent.get(a.child_id);
-      if (pid) doneByParent.set(pid, (doneByParent.get(pid) || 0) + 1);
-    }
-  });
-
   const revByParent = new Map<string, number>();
-  (payments || []).forEach((p) => {
-    if (p.status === 'success') revByParent.set(p.parent_id, (revByParent.get(p.parent_id) || 0) + (p.amount || 0));
-  });
 
-  let rows = parents || [];
-  if (query) {
-    rows = rows.filter((p) =>
-      [p.name, p.whatsapp, p.email, p.city].some((v) => String(v || '').toLowerCase().includes(query))
-    );
+  if (parentIds.length) {
+    const [{ data: children }, { data: payments }] = await Promise.all([
+      db.from('children').select('id, parent_id').in('parent_id', parentIds),
+      db.from('payment_orders').select('parent_id, amount, status').in('parent_id', parentIds).eq('status', 'success'),
+    ]);
+
+    (children || []).forEach((c) => {
+      childByParent.set(c.parent_id, (childByParent.get(c.parent_id) || 0) + 1);
+      childToParent.set(c.id, c.parent_id);
+    });
+
+    const childIds = (children || []).map((c) => c.id);
+    if (childIds.length) {
+      const { data: assessments } = await db.from('assessments').select('child_id, status').in('child_id', childIds);
+      (assessments || []).forEach((a) => {
+        if (a.status === 'completed' || a.status === 'done') {
+          const pid = childToParent.get(a.child_id);
+          if (pid) doneByParent.set(pid, (doneByParent.get(pid) || 0) + 1);
+        }
+      });
+    }
+
+    (payments || []).forEach((p) => {
+      revByParent.set(p.parent_id, (revByParent.get(p.parent_id) || 0) + (p.amount || 0));
+    });
   }
 
   return (
@@ -114,6 +135,16 @@ export default async function AdminParentsPage({ searchParams }: { searchParams:
           </div>
         )}
       </Card>
+
+      {rows.length > 0 && (
+        <Pagination
+          page={page}
+          total={total}
+          pageSize={PAGE_SIZE}
+          basePath="/admin/parents"
+          params={{ q: query || undefined }}
+        />
+      )}
     </div>
   );
 }

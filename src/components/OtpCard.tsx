@@ -1,12 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { sendOtpAction, verifyOtpAction } from '@/app/actions/auth';
 import { AlertTriangle, Check, ArrowRight, ArrowLeft } from 'lucide-react';
 
 export default function OtpCard() {
-  const router = useRouter();
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -48,16 +46,17 @@ export default function OtpCard() {
     try {
       const res = await verifyOtpAction(phone, name, otp);
       if (res.ok) {
-        router.push('/dashboard');
-        router.refresh();
+        // Full-page navigation so the new session cookies are picked up — a
+        // client router.push can land on a cached logged-out dashboard.
+        window.location.assign('/dashboard');
+        return;
       } else {
         setError(res.error || 'Invalid OTP. Please try again.');
       }
     } catch (err: any) {
       setError(err.message || 'Verification failed.');
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   return (

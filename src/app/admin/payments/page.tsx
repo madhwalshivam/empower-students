@@ -4,29 +4,49 @@ import { CreditCard, TrendingUp, Clock, XCircle, Check } from 'lucide-react';
 import { requireAdminUser } from '@/lib/admin/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { AdminPageHeader, Card, StatCard, Badge, EmptyState, inr, fmtDateTime } from '@/components/admin/ui';
+import Pagination, { parsePage } from '@/components/Pagination';
 import ReverifyButton from './ReverifyButton';
 
 export const dynamic = 'force-dynamic';
 
 const FILTERS = ['all', 'success', 'pending', 'failed'];
+const PAGE_SIZE = 20;
 
-export default async function AdminPaymentsPage({ searchParams }: { searchParams: Promise<{ filter?: string }> }) {
+export default async function AdminPaymentsPage({ searchParams }: { searchParams: Promise<{ filter?: string; page?: string }> }) {
   await requireAdminUser();
-  const { filter } = await searchParams;
+  const { filter, page: pageRaw } = await searchParams;
   const active = FILTERS.includes(filter || '') ? filter! : 'all';
+  const page = parsePage(pageRaw);
   const db = createAdminClient();
 
-  const { data: orders } = await db
+  // Counts are HEAD-only; revenue pulls just the `amount` column for successful
+  // orders; and only the current page of full rows is fetched via .range().
+  const [totalRes, pendingRes, failedRes, successAmts] = await Promise.all([
+    db.from('payment_orders').select('*', { count: 'exact', head: true }),
+    db.from('payment_orders').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+    db.from('payment_orders').select('*', { count: 'exact', head: true }).eq('status', 'failed'),
+    db.from('payment_orders').select('amount').eq('status', 'success'),
+  ]);
+
+  const revenue = (successAmts.data || []).reduce((s, o) => s + (o.amount || 0), 0);
+  const successCount = (successAmts.data || []).length;
+  const pendingCount = pendingRes.count || 0;
+  const failedCount = failedRes.count || 0;
+  const totalCount = totalRes.count || 0;
+
+  const total =
+    active === 'success' ? successCount :
+    active === 'pending' ? pendingCount :
+    active === 'failed' ? failedCount : totalCount;
+
+  const fromIdx = (page - 1) * PAGE_SIZE;
+  let listQuery = db
     .from('payment_orders')
     .select('*, parent:parents(name, whatsapp)')
-    .order('created_at', { ascending: false })
-    .limit(500);
-
-  const all = orders || [];
-  const revenue = all.filter((o) => o.status === 'success').reduce((s, o) => s + (o.amount || 0), 0);
-  const pendingCount = all.filter((o) => o.status === 'pending').length;
-  const failedCount = all.filter((o) => o.status === 'failed').length;
-  const rows = active === 'all' ? all : all.filter((o) => o.status === active);
+    .order('created_at', { ascending: false });
+  if (active !== 'all') listQuery = listQuery.eq('status', active);
+  const { data: orders } = await listQuery.range(fromIdx, fromIdx + PAGE_SIZE - 1);
+  const rows = orders || [];
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -53,7 +73,7 @@ export default async function AdminPaymentsPage({ searchParams }: { searchParams
             </Link>
           ))}
         </div>
-        <span className="text-xs text-slate-400">{rows.length} shown</span>
+        <span className="text-xs text-slate-400">{total} total</span>
       </Card>
 
       <Card>
@@ -98,6 +118,16 @@ export default async function AdminPaymentsPage({ searchParams }: { searchParams
           </div>
         )}
       </Card>
+
+      {rows.length > 0 && (
+        <Pagination
+          page={page}
+          total={total}
+          pageSize={PAGE_SIZE}
+          basePath="/admin/payments"
+          params={{ filter: active === 'all' ? undefined : active }}
+        />
+      )}
 
       <p className="text-xs text-slate-400 text-center">Re-verify hits the Cashfree API to recheck status. Idempotent — if already credited, nothing changes.</p>
     </div>

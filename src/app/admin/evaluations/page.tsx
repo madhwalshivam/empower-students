@@ -3,36 +3,52 @@ import { ClipboardList, FileText } from 'lucide-react';
 import { requireAdminUser } from '@/lib/admin/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { AdminPageHeader, Card, StatCard, Badge, EmptyState, inr, fmtDateTime } from '@/components/admin/ui';
+import Pagination, { parsePage } from '@/components/Pagination';
 
 export const dynamic = 'force-dynamic';
 
-export default async function AdminEvaluationsPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string }> }) {
+const PAGE_SIZE = 20;
+
+export default async function AdminEvaluationsPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; page?: string }> }) {
   await requireAdminUser();
-  const { q, status } = await searchParams;
+  const { q, status, page: pageRaw } = await searchParams;
+  const safeQ = (q || '').replace(/[%,()]/g, ' ').trim();
+  const statusFilter = status && status !== 'all' ? status : '';
+  const page = parsePage(pageRaw);
   const db = createAdminClient();
 
-  // Graceful: parent_reflect_sessions may not exist yet.
-  let sessions: any[] = [];
+  // Overview counts are cheap HEAD counts; only the current page of rows is
+  // fetched. Wrapped in try/catch since parent_reflect_sessions may not exist on
+  // a fresh install.
+  let rows: any[] = [];
+  let total = 0;
+  let completed = 0, hasPdf = 0, refunded = 0, followed = 0;
   try {
-    const { data, error } = await db
+    const [c1, c2, c3, c4] = await Promise.all([
+      db.from('parent_reflect_sessions').select('*', { count: 'exact', head: true }).eq('status', 'completed'),
+      db.from('parent_reflect_sessions').select('*', { count: 'exact', head: true }).not('parent_summary_md', 'is', null),
+      db.from('parent_reflect_sessions').select('*', { count: 'exact', head: true }).eq('status', 'refunded'),
+      db.from('parent_reflect_sessions').select('*', { count: 'exact', head: true }).not('admin_follow_up_by', 'is', null),
+    ]);
+    completed = c1.count || 0;
+    hasPdf = c2.count || 0;
+    refunded = c3.count || 0;
+    followed = c4.count || 0;
+
+    const fromIdx = (page - 1) * PAGE_SIZE;
+    // Use an inner join only when searching by parent, so the filter applies to
+    // the joined parents row; otherwise a normal left join.
+    let listQuery = db
       .from('parent_reflect_sessions')
-      .select('*, parent:parents(name, whatsapp)')
-      .order('id', { ascending: false })
-      .limit(200);
-    if (!error) sessions = data || [];
+      .select(`*, parent:parents${safeQ ? '!inner' : ''}(name, whatsapp)`, { count: 'exact' })
+      .order('id', { ascending: false });
+    if (statusFilter) listQuery = listQuery.eq('status', statusFilter);
+    if (safeQ) listQuery = listQuery.or(`name.ilike.%${safeQ}%,whatsapp.ilike.%${safeQ}%`, { referencedTable: 'parent' });
+
+    const { data, count } = await listQuery.range(fromIdx, fromIdx + PAGE_SIZE - 1);
+    rows = data || [];
+    total = count || 0;
   } catch { /* table absent */ }
-
-  let rows = sessions;
-  if (status && status !== 'all') rows = rows.filter((s) => s.status === status);
-  if (q) {
-    const ql = q.toLowerCase();
-    rows = rows.filter((s) => [s.parent?.name, s.parent?.whatsapp].some((v) => String(v || '').toLowerCase().includes(ql)));
-  }
-
-  const completed = sessions.filter((s) => s.status === 'completed').length;
-  const hasPdf = sessions.filter((s) => s.parent_summary_md).length;
-  const refunded = sessions.filter((s) => s.status === 'refunded').length;
-  const followed = sessions.filter((s) => s.admin_follow_up_by).length;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -61,7 +77,7 @@ export default async function AdminEvaluationsPage({ searchParams }: { searchPar
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <StatCard label="Total shown" value={rows.length} accent="slate" />
+        <StatCard label="Total" value={total} accent="slate" />
         <StatCard label="Completed" value={completed} accent="emerald" />
         <StatCard label="Has PDF" value={hasPdf} accent="violet" />
         <StatCard label="Refunded" value={refunded} accent="amber" />
@@ -109,6 +125,16 @@ export default async function AdminEvaluationsPage({ searchParams }: { searchPar
           </div>
         )}
       </Card>
+
+      {rows.length > 0 && (
+        <Pagination
+          page={page}
+          total={total}
+          pageSize={PAGE_SIZE}
+          basePath="/admin/evaluations"
+          params={{ q: q || undefined, status: statusFilter || undefined }}
+        />
+      )}
     </div>
   );
 }

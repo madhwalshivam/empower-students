@@ -181,6 +181,44 @@ export async function deleteSpecialistAction(id: number) {
   }
 }
 
+// Mark ALL of a partner's pending commission payouts as paid (i.e. the admin has
+// disbursed the money via UPI/bank). Returns how much was settled so the UI can
+// confirm it. Idempotent-ish: if nothing is pending it's a no-op.
+export async function markPartnerPaidAction(partnerId: string) {
+  try {
+    if (!(await requireAdmin())) return { ok: false, error: 'Unauthorized.' };
+    const db = createAdminClient();
+
+    const { data: pending } = await db
+      .from('partner_payouts')
+      .select('id, partner_amount')
+      .eq('partner_id', partnerId)
+      .eq('status', 'pending');
+
+    const rows = pending || [];
+    if (rows.length === 0) return { ok: true, count: 0, amount: 0 };
+
+    const amount = rows.reduce((s, r) => s + (r.partner_amount || 0), 0);
+
+    const { error } = await db
+      .from('partner_payouts')
+      .update({ status: 'paid' })
+      .eq('partner_id', partnerId)
+      .eq('status', 'pending');
+
+    if (error) {
+      console.error('Mark partner paid error:', error);
+      return { ok: false, error: error.message };
+    }
+
+    revalidatePath('/admin/partners');
+    revalidatePath('/admin/dashboard');
+    return { ok: true, count: rows.length, amount };
+  } catch (err: any) {
+    return { ok: false, error: err.message || 'Failed to mark paid.' };
+  }
+}
+
 export async function updatePartnerStatusAction(
   partnerId: string,
   status: 'active' | 'pending' | 'paused' | 'terminated'

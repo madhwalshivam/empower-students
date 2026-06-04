@@ -5,16 +5,25 @@ import { headers } from 'next/headers';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import CopyLinkButton from './CopyLinkButton';
+import Pagination, { parsePage } from '@/components/Pagination';
 import {
   Users,
   Award,
   DollarSign,
   Share2,
   Plus,
-  LogOut
+  Clock,
+  CheckCircle2,
+  TrendingUp,
+  Receipt
 } from 'lucide-react';
 
-export default async function PartnerDashboardPage() {
+export default async function PartnerDashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ fpage?: string; cpage?: string }>;
+}) {
+  const sp = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -67,24 +76,52 @@ export default async function PartnerDashboardPage() {
     );
   }
 
-  // Fetch referred parents count & list
-  const { data: referredParentsData } = await db
+  // Two independent pagers on this page: families (fpage) and commissions (cpage).
+  const fpage = parsePage(sp.fpage);
+  const cpage = parsePage(sp.cpage);
+  const FAM_SIZE = 10;
+  const COMM_SIZE = 10;
+
+  // Referred families — only the current page is fetched (with an exact count).
+  const famFrom = (fpage - 1) * FAM_SIZE;
+  const { data: referredParentsData, count: famCount } = await db
     .from('parents')
-    .select('id, name, whatsapp, email, credits, created_at')
+    .select('id, name, whatsapp, email, credits, created_at', { count: 'exact' })
     .eq('partner_id', partner.id)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .range(famFrom, famFrom + FAM_SIZE - 1);
 
   const referredParents = referredParentsData || [];
+  const familiesTotal = famCount ?? 0;
 
-  // Fetch earnings for this partner
-  const { data: payoutsData } = await db
+  // Earnings TOTALS need every payout, but we only pull two tiny columns to keep
+  // it light — not the full joined rows.
+  const { data: sumRows } = await db
     .from('partner_payouts')
-    .select('partner_amount')
+    .select('partner_amount, status')
     .eq('partner_id', partner.id);
+  const allPayouts = sumRows || [];
+  const totalEarnings = allPayouts.reduce((sum, p) => sum + (p.partner_amount || 0), 0);
+  const pendingEarnings = allPayouts
+    .filter((p: any) => p.status === 'pending')
+    .reduce((sum, p) => sum + (p.partner_amount || 0), 0);
+  const paidEarnings = allPayouts
+    .filter((p: any) => p.status === 'paid')
+    .reduce((sum, p) => sum + (p.partner_amount || 0), 0);
+
+  // Commission HISTORY — paginated, full detail (joined parent name).
+  const commFrom = (cpage - 1) * COMM_SIZE;
+  const { data: payoutsData, count: commCount } = await db
+    .from('partner_payouts')
+    .select('partner_amount, gross_amount, share_rate_used, status, created_at, parent:parents(name)', { count: 'exact' })
+    .eq('partner_id', partner.id)
+    .order('created_at', { ascending: false })
+    .range(commFrom, commFrom + COMM_SIZE - 1);
 
   const payouts = payoutsData || [];
+  const commissionsTotal = commCount ?? 0;
 
-  const totalEarnings = payouts.reduce((sum, p) => sum + (p.partner_amount || 0), 0);
+  const inr = (n: number) => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
   // Generate Referral Links & Messages — derive origin from the request
   const hdrs = await headers();
@@ -140,7 +177,7 @@ export default async function PartnerDashboardPage() {
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Referred Families</p>
             <p className="text-2xl font-extrabold text-slate-800 dark:text-slate-100 mt-0.5">
-              {referredParents?.length || 0}
+              {familiesTotal || 0}
             </p>
           </div>
         </div>
@@ -221,11 +258,115 @@ export default async function PartnerDashboardPage() {
         </div>
       </section>
 
+      {/* Earnings — commission breakdown + history */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-bold text-slate-850 dark:text-slate-100 flex items-center gap-2">
+          <TrendingUp size={20} className="text-indigo-600" /> Your Earnings
+        </h2>
+        <p className="text-sm text-slate-500 -mt-2">
+          You earn <strong className="text-indigo-650">15%</strong> commission every time a parent you referred tops up their wallet.
+        </p>
+
+        {/* Breakdown cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 flex items-center justify-center text-indigo-650 dark:text-indigo-400">
+              <DollarSign size={24} />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Total Earned</p>
+              <p className="text-2xl font-extrabold text-slate-800 dark:text-slate-100 mt-0.5">{inr(totalEarnings)}</p>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/30 flex items-center justify-center text-amber-600 dark:text-amber-400">
+              <Clock size={24} />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Pending Payout</p>
+              <p className="text-2xl font-extrabold text-slate-800 dark:text-slate-100 mt-0.5">{inr(pendingEarnings)}</p>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 size={24} />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Paid Out</p>
+              <p className="text-2xl font-extrabold text-slate-800 dark:text-slate-100 mt-0.5">{inr(paidEarnings)}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Commission history */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+          <h3 className="text-base font-bold text-slate-850 dark:text-slate-100 flex items-center gap-2">
+            <Receipt size={18} className="text-slate-400" /> Commission History
+          </h3>
+          {payouts.length === 0 ? (
+            <div className="text-center py-10 bg-slate-50 dark:bg-slate-950/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+              <DollarSign size={28} className="text-slate-400 mx-auto mb-2" />
+              <p className="text-sm text-slate-500 font-medium">No commissions yet.</p>
+              <p className="text-xs text-slate-400 mt-1">You&apos;ll earn here when a referred parent tops up their wallet.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-slate-100 dark:border-slate-800 rounded-2xl">
+              <table className="w-full text-sm text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/40 text-slate-400 text-xs font-bold uppercase tracking-wider border-b border-slate-100 dark:border-slate-800">
+                    <th className="px-5 py-3">Date</th>
+                    <th className="px-5 py-3">Parent</th>
+                    <th className="px-5 py-3 text-right">Top-up</th>
+                    <th className="px-5 py-3 text-center">Rate</th>
+                    <th className="px-5 py-3 text-right">Your Commission</th>
+                    <th className="px-5 py-3 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {payouts.map((p: any, i: number) => (
+                    <tr key={i} className="hover:bg-slate-50/40 dark:hover:bg-slate-800/20 transition-all">
+                      <td className="px-5 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        {p.created_at ? new Date(p.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                      </td>
+                      <td className="px-5 py-3 font-semibold text-slate-700 dark:text-slate-200">{p.parent?.name || '—'}</td>
+                      <td className="px-5 py-3 text-right text-slate-500 dark:text-slate-400">{inr(p.gross_amount)}</td>
+                      <td className="px-5 py-3 text-center text-slate-400">{Math.round((p.share_rate_used || 0) * 100)}%</td>
+                      <td className="px-5 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 font-mono">{inr(p.partner_amount)}</td>
+                      <td className="px-5 py-3 text-center">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide ${
+                          p.status === 'paid'
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400'
+                            : 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400'
+                        }`}>
+                          {p.status || 'pending'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {commissionsTotal > COMM_SIZE && (
+            <Pagination
+              page={cpage}
+              total={commissionsTotal}
+              pageSize={COMM_SIZE}
+              basePath="/partner/dashboard"
+              pageParam="cpage"
+              params={{ fpage: fpage > 1 ? fpage : undefined }}
+            />
+          )}
+        </div>
+      </section>
+
       {/* Referrals List & Table */}
       <section className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
         <div>
           <h2 className="text-xl font-bold text-slate-850 dark:text-slate-100">
-            👥 Registered Families ({referredParents?.length || 0})
+            👥 Registered Families ({familiesTotal || 0})
           </h2>
           <p className="text-sm text-slate-500 mt-1">
             Directly enrolled parents and families linked to your referral code.
@@ -277,6 +418,17 @@ export default async function PartnerDashboardPage() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {familiesTotal > FAM_SIZE && (
+          <Pagination
+            page={fpage}
+            total={familiesTotal}
+            pageSize={FAM_SIZE}
+            basePath="/partner/dashboard"
+            pageParam="fpage"
+            params={{ cpage: cpage > 1 ? cpage : undefined }}
+          />
         )}
       </section>
     </div>

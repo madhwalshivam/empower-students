@@ -5,6 +5,10 @@ const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY || '';
 const CASHFREE_ENV = process.env.CASHFREE_ENV || 'sandbox'; // sandbox or production
 const CASHFREE_API_VERSION = '2023-08-01';
 
+// Commission a partner earns on every wallet top-up made by a parent they
+// referred. 15% by default; override with PARTNER_TOPUP_RATE (e.g. 0.20 = 20%).
+const TOPUP_COMMISSION_RATE = Number(process.env.PARTNER_TOPUP_RATE) || 0.15;
+
 export function isCashfreeConfigured(): boolean {
   return !!CASHFREE_APP_ID && !!CASHFREE_SECRET_KEY;
 }
@@ -150,14 +154,18 @@ export async function creditOrderIfPaid(orderId: string): Promise<{
       .eq('id', po.parent_id);
 
     // Record wallet ledger transaction entry
-    await supabase.from('wallet_ledger').insert({
-      parent_id: po.parent_id,
-      amount: creditAmount,
-      balance_after: nextCredits,
-      service_key: 'wallet_topup',
-      ref_id: po.id,
-      reason: `Top-up via Cashfree (order ${orderId})`,
-    });
+    const { data: ledgerRow } = await supabase
+      .from('wallet_ledger')
+      .insert({
+        parent_id: po.parent_id,
+        amount: creditAmount,
+        balance_after: nextCredits,
+        service_key: 'wallet_topup',
+        ref_id: po.id,
+        reason: `Top-up via Cashfree (order ${orderId})`,
+      })
+      .select('id')
+      .single();
 
     // Mark payment order as completed and credited
     await supabase
@@ -169,6 +177,47 @@ export async function creditOrderIfPaid(orderId: string): Promise<{
         raw_response: JSON.stringify(cfOrder).substring(0, 5000),
       })
       .eq('id', po.id);
+
+    // Partner commission: if this parent was referred by a partner, that partner
+    // earns TOPUP_COMMISSION_RATE (15%) of the top-up amount as a pending payout.
+    // This runs only here — inside the one-time "transition to credited" block —
+    // so a top-up is never double-commissioned. Wrapped in try/catch so a payout
+    // hiccup can never undo the (already-completed) wallet credit.
+    try {
+      const { data: parentRow } = await supabase
+        .from('parents')
+        .select('partner_id')
+        .eq('id', po.parent_id)
+        .maybeSingle();
+
+      const partnerId = parentRow?.partner_id;
+      if (partnerId) {
+        const { data: partner } = await supabase
+          .from('partners')
+          .select('status')
+          .eq('id', partnerId)
+          .maybeSingle();
+
+        // Only active partners earn commission.
+        if (partner && partner.status === 'active') {
+          const gross = Number(po.amount); // top-up amount in INR
+          const partnerAmount = Math.round(gross * TOPUP_COMMISSION_RATE * 100) / 100;
+
+          await supabase.from('partner_payouts').insert({
+            partner_id: partnerId,
+            parent_id: po.parent_id,
+            wallet_ledger_id: ledgerRow?.id ?? null,
+            service_key: 'wallet_topup',
+            gross_amount: gross,
+            partner_amount: partnerAmount,
+            share_rate_used: TOPUP_COMMISSION_RATE,
+            status: 'pending',
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[creditOrderIfPaid] partner commission error:', err);
+    }
 
     return { status: 'credited', newBalance: nextCredits };
   }

@@ -3,10 +3,15 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import WalletClient from './WalletClient';
+import { parsePage } from '@/components/Pagination';
 
 export const dynamic = 'force-dynamic';
 
-export default async function WalletPage() {
+const PAGE_SIZE = 15;
+
+export default async function WalletPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
+  const { page: pageRaw } = await searchParams;
+  const page = parsePage(pageRaw);
   const supabase = await createClient();
 
   // Validate session
@@ -30,18 +35,24 @@ export default async function WalletPage() {
     redirect('/dashboard');
   }
 
-  // Load wallet history ledger entries
-  const { data: history } = await db
+  // Load only the current page of ledger entries (with an exact total count) so a
+  // long transaction history never loads all at once.
+  const fromIdx = (page - 1) * PAGE_SIZE;
+  const { data: history, count } = await db
     .from('wallet_ledger')
-    .select('*')
+    .select('*', { count: 'exact' })
     .eq('parent_id', user.id)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .range(fromIdx, fromIdx + PAGE_SIZE - 1);
 
   return (
     <React.Suspense fallback={<div className="text-slate-500 text-center py-8">Loading wallet...</div>}>
       <WalletClient
         initialBalance={parent.credits || 0}
         history={history || []}
+        page={page}
+        total={count || 0}
+        pageSize={PAGE_SIZE}
       />
     </React.Suspense>
   );
