@@ -111,11 +111,11 @@ export default function PartnerAddFamilyPage() {
 
         <form onSubmit={handleSubmit} className="space-y-8">
           {/* Section: Parent Details */}
-          <fieldset className="border-0 p-0 m-0 space-y-4">
-            <legend className="text-base font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2 w-full">
+          <section className="space-y-4">
+            <h2 className="flex items-center gap-2 text-base font-bold text-slate-800 dark:text-slate-200 border-b border-slate-100 dark:border-slate-800 pb-2 m-0">
               <User size={18} className="text-indigo-650" />
               <span>Parent Details</span>
-            </legend>
+            </h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -162,14 +162,14 @@ export default function PartnerAddFamilyPage() {
                 </p>
               </div>
             </div>
-          </fieldset>
+          </section>
 
           {/* Section: Child Details */}
-          <fieldset className="border-0 p-0 m-0 space-y-4">
-            <legend className="text-base font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2 w-full">
+          <section className="space-y-4">
+            <h2 className="flex items-center gap-2 text-base font-bold text-slate-800 dark:text-slate-200 border-b border-slate-100 dark:border-slate-800 pb-2 m-0">
               <Baby size={18} className="text-indigo-650" />
               <span>Child Details</span>
-            </legend>
+            </h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
@@ -267,7 +267,7 @@ export default function PartnerAddFamilyPage() {
                 />
               </div>
             </div>
-          </fieldset>
+          </section>
 
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
             <Link

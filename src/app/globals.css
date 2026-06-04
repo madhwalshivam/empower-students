@@ -336,6 +336,14 @@ a {
 .font-bold { font-weight: 700; }
 .font-extrabold { font-weight: 800; }
 
+.uppercase { text-transform: uppercase; }
+.lowercase { text-transform: lowercase; }
+.capitalize { text-transform: capitalize; }
+.tracking-tight { letter-spacing: -0.01em; }
+.tracking-wide { letter-spacing: 0.025em; }
+.tracking-wider { letter-spacing: 0.05em; }
+.no-underline { text-decoration: none; }
+
 .line-clamp-1 {
   display: -webkit-box;
   -webkit-line-clamp: 1;
@@ -345,6 +353,7 @@ a {
 }
 
 /* Borders & Rounding */
+.border-0 { border: 0; }
 .border { border: 1px solid var(--surface-border); }
 .border-2 { border: 2px solid var(--surface-border); }
 .border-t { border-top: 1px solid var(--surface-border); }
@@ -700,6 +709,11 @@ ul {
 .right-3 { right: 12px; }
 .-translate-y-1\/2 { transform: translateY(-50%); }
 .p-0 { padding: 0; }
+.m-0 { margin: 0; }
+
+/* Normalize native fieldset / legend so they don't add default borders or insets */
+fieldset { min-inline-size: auto; }
+legend { padding-inline: 0; }
 
 /* Premium Segmented Filter Tabs */
 .es-tab {
