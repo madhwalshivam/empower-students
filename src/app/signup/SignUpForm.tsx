@@ -228,9 +228,7 @@ export default function SignUpForm() {
                 style={{ paddingLeft: '36px' }}
               />
             </div>
-            <p className="text-[10px] text-slate-400 mt-1">
-              Got a code from a tutor or centre? Enter it so they get credit. (Auto-applied if you opened their link.)
-            </p>
+            
           </div>
         )}
 
