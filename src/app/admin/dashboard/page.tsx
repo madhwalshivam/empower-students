@@ -9,7 +9,7 @@ import {
   BarChart3, ClipboardList, FileText, CreditCard,
 } from 'lucide-react';
 import SpecialistManager from './SpecialistManager';
-import PartnerApplicationActions from './PartnerApplicationActions';
+import PartnerRowActions from '../partners/PartnerRowActions';
 
 export const dynamic = 'force-dynamic';
 
@@ -79,7 +79,11 @@ export default async function AdminDashboardPage() {
       q.select('id, module, status, score, completed_at, created_at, child:children(id,name,parent:parents(name))')
         .order('created_at', { ascending: false }).limit(8)),
     rowsOf('specialists', (q) => q.order('order_no', { ascending: true })),
-    rowsOf('partner_applications', (q) => q.eq('status', 'pending').order('created_at', { ascending: false })),
+    // Pending partner sign-ups live in the `partners` table (status='pending') —
+    // the SAME source the Partners page acts on. The old code read a separate
+    // `partner_applications` table that these registrations never land in, so the
+    // Overview always claimed "no pending applications" even when one existed.
+    rowsOf('partners', (q) => q.eq('status', 'pending').order('created_at', { ascending: false })),
   ]);
 
   // Derived figures
@@ -162,8 +166,7 @@ export default async function AdminDashboardPage() {
           </div>
           <div className="space-y-2">
             {pendingApplications.map((app) => {
-              const wa = String(app.whatsapp || '').replace(/\D/g, '');
-              const waLink = `https://wa.me/${wa}?text=${encodeURIComponent(`Hello ${app.name}! Your EmpowerStudents partner application has been approved. You can now log in at empowerstudents.in/partner-login using this WhatsApp number.`)}`;
+              const phone = String(app.whatsapp || app.phone || '').replace(/\D/g, '');
               return (
                 <div key={app.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 flex items-center justify-between flex-wrap gap-3">
                   <div className="flex items-center gap-3 min-w-0">
@@ -171,13 +174,25 @@ export default async function AdminDashboardPage() {
                       {String(app.name || '?').charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0">
-                      <div className="font-semibold text-slate-800 dark:text-slate-100">{app.name}</div>
+                      <div className="font-semibold text-slate-800 dark:text-slate-100">{app.name || '—'}</div>
                       <div className="text-xs text-slate-500 truncate">
-                        {app.clinic || '—'}{app.city ? ` · ${app.city}` : ''} · {app.whatsapp}
+                        {app.contact_name || '—'}{app.city ? ` · ${app.city}` : ''}{phone ? ` · ${app.whatsapp || app.phone}` : ''}
                       </div>
                     </div>
                   </div>
-                  <PartnerApplicationActions id={app.id} whatsappLink={waLink} />
+                  <div className="flex items-center gap-3 flex-shrink-0 flex-wrap">
+                    {phone && (
+                      <a
+                        href={`https://wa.me/${phone}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-full text-xs font-bold inline-flex items-center gap-1 no-underline"
+                      >
+                        <MessageSquare size={13} /> WhatsApp
+                      </a>
+                    )}
+                    <PartnerRowActions partnerId={app.id} currentStatus={app.status || 'pending'} />
+                  </div>
                 </div>
               );
             })}

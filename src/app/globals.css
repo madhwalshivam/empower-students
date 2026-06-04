@@ -135,6 +135,7 @@ a {
   .md\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .md\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .md\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .md\:grid-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .md\:grid-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .md\:grid-cols-12 { grid-template-columns: repeat(12, minmax(0, 1fr)); }
   .md\:col-span-1 { grid-column: span 1 / span 1; }
@@ -153,8 +154,10 @@ a {
 }
 
 @media (min-width: 1024px) {
+  .lg\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lg\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .lg\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .lg\:grid-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .lg\:grid-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 
@@ -371,7 +374,10 @@ a {
 }
 
 .text-white { color: #ffffff; }
+.text-indigo-100 { color: #e0e7ff; }
+.text-indigo-400 { color: #818cf8; }
 .text-indigo-600 { color: var(--primary); }
+.text-indigo-650 { color: #4f46e5; }
 .text-indigo-700 { color: var(--primary-hover); }
 .text-indigo-750 { color: var(--primary-hover); }
 .text-indigo-800 { color: var(--primary-hover); }
@@ -386,6 +392,7 @@ a {
 .text-slate-650 { color: var(--text-primary); }
 .text-slate-700 { color: var(--text-primary); }
 .text-slate-800 { color: var(--text-primary); }
+.text-slate-850 { color: var(--text-primary); }
 .text-slate-900 { color: var(--text-primary); }
 
 .bg-indigo-50 { background-color: var(--primary-light); }
@@ -616,6 +623,7 @@ a {
 .text-sky-600 { color: #0284c7; }
 .text-violet-500 { color: #8b5cf6; }
 .text-violet-600 { color: #7c3aed; }
+.text-violet-650 { color: #6d28d9; }
 .text-violet-700 { color: #6d28d9; }
 .text-slate-200 { color: #e2e8f0; }
 .text-slate-300 { color: #cbd5e1; }
@@ -652,6 +660,9 @@ ul {
 .mb-12 { margin-bottom: 48px; }
 .p-1\.5 { padding: 6px; }
 .shadow-md { box-shadow: var(--shadow-md); }
+.shadow-sm { box-shadow: var(--shadow-sm); }
+.shadow-lg { box-shadow: var(--shadow-lg); }
+.shadow-xl { box-shadow: var(--shadow-xl); }
 
 /* Premium Dark Footer System */
 .footer-premium {
@@ -811,6 +822,9 @@ ul {
 .es-skeleton-box {
   background-color: var(--surface-border);
   border-radius: 12px;
+  /* Self-animate so every skeleton bar shimmers, even outside an
+     .animate-pulse wrapper. */
+  animation: pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 [data-theme='dark'] .es-skeleton-box {
   background-color: #1f2937;

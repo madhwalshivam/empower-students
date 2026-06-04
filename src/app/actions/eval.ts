@@ -9,7 +9,7 @@ import {
   ceFinaliseSession
 } from '@/lib/evaluations/engine';
 
-export async function startSessionAction(childId: number, moduleKey: string) {
+export async function startSessionAction(childId: number, moduleKey: string, lang?: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
@@ -108,7 +108,14 @@ export async function startSessionAction(childId: number, moduleKey: string) {
     });
   }
 
-  return { ok: true, sessionId, charged: needCharge ? price : 0, balance: newBalance };
+  // Generate the FIRST question in the SAME round-trip. Previously the client
+  // called startSession, waited, then made a second call (with its own auth
+  // round-trip) to fetch question 1 — so the parent stared at a spinner through
+  // two sequential server hops before anything appeared. Folding the first
+  // question in here removes that extra hop entirely.
+  const firstQuestion = await ceGenerateNextQuestion(sessionId, lang);
+
+  return { ok: true, sessionId, charged: needCharge ? price : 0, balance: newBalance, firstQuestion };
 }
 
 export async function getNextQuestionAction(sessionId: number, lang?: string) {
@@ -133,6 +140,31 @@ export async function submitAnswerAction(
   }
 
   return await ceSubmitAnswer(sessionId, answerPayload, lang);
+}
+
+// Score the current answer AND fetch the next question in a SINGLE server round
+// trip. The two steps are inherently sequential (the next question's difficulty
+// adapts to whether this answer was right), but doing them in one action removes
+// a whole client→server hop and a second auth round-trip per question — the
+// overhead that made the gap between questions feel long.
+export async function submitAndGetNextAction(
+  sessionId: number,
+  answerPayload: { text?: string; choice?: string; response_seconds?: number },
+  lang?: string
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    throw new Error('Authentication required');
+  }
+
+  const submit = await ceSubmitAnswer(sessionId, answerPayload, lang);
+  if (!submit.ok) {
+    return { submit, next: null };
+  }
+
+  const next = await ceGenerateNextQuestion(sessionId, lang);
+  return { submit, next };
 }
 
 export async function finaliseSessionAction(sessionId: number, lang?: string) {

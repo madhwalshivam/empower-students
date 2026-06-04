@@ -108,10 +108,36 @@ export async function signUpAction(
       console.error('Partner profile insert error:', partnerInsertErr);
     }
   } else {
-    // Read referral cookies
+    // Resolve the referrer. A code the parent TYPED on the form wins; otherwise
+    // fall back to the cookie set when they arrived via a /r/<code> link. This is
+    // what makes the bare code usable even without the link.
     const cookieStore = await cookies();
-    const referredByPartnerId = cookieStore.get('referred_by_partner_id')?.value || null;
-    const referredByParentId = cookieStore.get('referred_by_parent_id')?.value || null;
+    let referredByPartnerId = cookieStore.get('referred_by_partner_id')?.value || null;
+    let referredByParentId = cookieStore.get('referred_by_parent_id')?.value || null;
+
+    const typedCode = additionalFields?.referralCode?.trim().toUpperCase();
+    if (typedCode) {
+      // A code can belong to a partner or to a referring parent — check both.
+      const { data: refPartner } = await supabaseAdmin
+        .from('partners')
+        .select('id')
+        .eq('referral_code', typedCode)
+        .maybeSingle();
+
+      if (refPartner) {
+        referredByPartnerId = refPartner.id;
+        referredByParentId = null;
+      } else {
+        const { data: refParent } = await supabaseAdmin
+          .from('parents')
+          .select('id')
+          .eq('referral_code', typedCode)
+          .maybeSingle();
+        if (refParent) {
+          referredByParentId = refParent.id;
+        }
+      }
+    }
 
     // Create parent record
     const { error: parentInsertErr } = await supabaseAdmin.from('parents').insert({

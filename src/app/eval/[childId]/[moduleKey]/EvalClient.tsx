@@ -6,8 +6,7 @@ import Link from 'next/link';
 import { useTranslation } from '@/components/I18nContext';
 import {
   startSessionAction,
-  getNextQuestionAction,
-  submitAnswerAction,
+  submitAndGetNextAction,
   finaliseSessionAction
 } from '@/app/actions/eval';
 import {
@@ -140,10 +139,12 @@ export default function EvalClient({ childId, moduleKey, childName, price = 0, b
     setErrorMsg('');
 
     try {
-      const res = await startSessionAction(childId, moduleKey);
+      // startSessionAction now returns the FIRST question in the same call, so
+      // there's no second round-trip before the child sees question 1.
+      const res = await startSessionAction(childId, moduleKey, language);
       if (res.ok && res.sessionId) {
         setSessionId(res.sessionId);
-        await loadNextQuestion(res.sessionId);
+        await applyQuestionResult(res.firstQuestion, res.sessionId);
       } else if (res.error === 'insufficient') {
         setNeedTopup({ needed: res.needed || 0, balance: res.balance || 0 });
         setStep('error');
@@ -166,13 +167,12 @@ export default function EvalClient({ childId, moduleKey, childName, price = 0, b
     }
   };
 
-  // Load the next question from engine
-  const loadNextQuestion = async (sessId: number) => {
-    setStep('loading');
+  // Apply a question result (the shape returned by ceGenerateNextQuestion) to
+  // the UI. Shared by the start flow and the submit flow so both render the next
+  // question — or finalise into the report — through one consistent code path.
+  const applyQuestionResult = async (res: any, sessId: number) => {
     try {
-      const res = await getNextQuestionAction(sessId, language);
-
-      if (res.ok) {
+      if (res && res.ok) {
         if (res.done) {
           // Finalize session and get report
           const finalRes = await finaliseSessionAction(sessId, language);
@@ -203,7 +203,7 @@ export default function EvalClient({ childId, moduleKey, childName, price = 0, b
         }
       } else {
         setStep('error');
-        setErrorMsg(res.error || 'Failed to fetch the next task question.');
+        setErrorMsg((res && res.error) || 'Failed to fetch the next task question.');
       }
     } catch (err: any) {
       setStep('error');
@@ -253,12 +253,13 @@ export default function EvalClient({ childId, moduleKey, childName, price = 0, b
     }
 
     try {
-      const res = await submitAnswerAction(sessionId, payload, language);
-      if (res.ok) {
-        await loadNextQuestion(sessionId);
+      // One round-trip: score this answer AND get the next question together.
+      const res = await submitAndGetNextAction(sessionId, payload, language);
+      if (res.submit && res.submit.ok) {
+        await applyQuestionResult(res.next, sessionId);
       } else {
         setStep('error');
-        setErrorMsg(res.error || 'Failed to submit answer.');
+        setErrorMsg((res.submit && res.submit.error) || 'Failed to submit answer.');
       }
     } catch (err: any) {
       setStep('error');

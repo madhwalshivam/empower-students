@@ -44,7 +44,7 @@ export default function SignUpForm() {
         phone,
         password,
         role,
-        role === 'partner' ? { referralCode, city, upiId } : undefined
+        role === 'partner' ? { referralCode, city, upiId } : { referralCode }
       );
 
       if (res.ok) {
@@ -207,6 +207,32 @@ export default function SignUpForm() {
             />
           </div>
         </div>
+
+        {/* Parent: optional referral / partner code. Lets a parent who only has
+            the CODE (not the link) still be attributed to the partner. */}
+        {role === 'parent' && (
+          <div>
+            <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+              Referral Code <span className="text-slate-400 normal-case font-medium">(optional)</span>
+            </label>
+            <div className="relative">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <Tag size={16} />
+              </div>
+              <input
+                type="text"
+                value={referralCode}
+                onChange={(e) => setReferralCode(e.target.value)}
+                placeholder="e.g. RAJU123"
+                className="input-premium font-mono uppercase"
+                style={{ paddingLeft: '36px' }}
+              />
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1">
+              Got a code from a tutor or centre? Enter it so they get credit. (Auto-applied if you opened their link.)
+            </p>
+          </div>
+        )}
 
         {/* Partner Specific Fields */}
         {role === 'partner' && (

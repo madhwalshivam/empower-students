@@ -44,9 +44,38 @@ export default function UserShell({ children }: { children: React.ReactNode }) {
     fetchProfile();
   }, [pathname]);
 
+  // Keep the credit balance fresh WITHOUT hammering the server. The old code
+  // polled every 5s — each poll is an auth round-trip + a DB query, running
+  // forever in the background and competing with real navigation requests,
+  // which is a big part of why the app felt sluggish. Instead: poll every 30s
+  // and ONLY while the tab is visible, and refresh immediately when the user
+  // returns to the tab so the number is still up-to-date when it matters.
   useEffect(() => {
-    const interval = setInterval(fetchProfile, 5000);
-    return () => clearInterval(interval);
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const start = () => {
+      if (interval) return;
+      interval = setInterval(() => {
+        if (document.visibilityState === 'visible') fetchProfile();
+      }, 30000);
+    };
+    const stop = () => {
+      if (interval) { clearInterval(interval); interval = null; }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') { fetchProfile(); start(); }
+      else stop();
+    };
+
+    if (document.visibilityState === 'visible') start();
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', fetchProfile);
+
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', fetchProfile);
+    };
   }, []);
 
   useEffect(() => {

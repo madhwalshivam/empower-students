@@ -58,12 +58,37 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     }
   }
 
-  // Fetch parent details
-  const { data: parent } = await supabaseAdmin
-    .from('parents')
-    .select('*')
-    .eq('id', user.id)
-    .single();
+  // These three reads are independent of each other (all keyed by the logged-in
+  // user), so fire them together instead of one-after-another. Replacing the
+  // sequential waterfall with parallel batches is what makes the dashboard open
+  // quickly instead of stacking ~6 network round-trips back to back.
+  const [
+    { data: parent },
+    { data: children },
+    { data: unreadFeedback },
+    { data: premiumReflect },
+  ] = await Promise.all([
+    supabaseAdmin.from('parents').select('*').eq('id', user.id).single(),
+    supabaseAdmin
+      .from('children')
+      .select('*')
+      .eq('parent_id', user.id)
+      .order('created_at', { ascending: false }),
+    supabaseAdmin
+      .from('parent_feedback')
+      .select('*')
+      .eq('parent_id', user.id)
+      .eq('seen_by_parent', 0)
+      .order('id', { ascending: false }),
+    supabaseAdmin
+      .from('parent_reflect_sessions')
+      .select('*')
+      .eq('parent_id', user.id)
+      .eq('status', 'completed')
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   if (!parent) {
     // Proactively provision parent if missing
@@ -76,70 +101,46 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     redirect('/dashboard');
   }
 
-  // Fetch children
-  const { data: children } = await supabaseAdmin
-    .from('children')
-    .select('*')
-    .eq('parent_id', user.id)
-    .order('created_at', { ascending: false });
-
   const childrenList = children || [];
-
-  // Completed-module counts per child (distinct modules) — drives the list + progress
-  const completedByChild: Record<number, Set<string>> = {};
-  if (childrenList.length > 0) {
-    const { data: allCompleted } = await supabaseAdmin
-      .from('assessments')
-      .select('child_id, module')
-      .in('child_id', childrenList.map((c) => c.id))
-      .eq('status', 'completed');
-    (allCompleted || []).forEach((a: any) => {
-      const cid = Number(a.child_id);
-      if (!completedByChild[cid]) completedByChild[cid] = new Set<string>();
-      if (a.module) completedByChild[cid].add(a.module);
-    });
-  }
-
-  // Fetch unread feedback notes
-  const { data: unreadFeedback } = await supabaseAdmin
-    .from('parent_feedback')
-    .select('*')
-    .eq('parent_id', user.id)
-    .eq('seen_by_parent', 0)
-    .order('id', { ascending: false });
-
   const feedbackList = unreadFeedback || [];
+  const reflectCompleted: any = premiumReflect;
 
   // Determine selected child
   const selectedCid = resolvedSearchParams.cid ? Number(resolvedSearchParams.cid) : (childrenList[0]?.id || 0);
   const selectedChild = childrenList.find((c) => Number(c.id) === selectedCid) || childrenList[0] || null;
 
-  // Premium evaluations for the selected child
-  let speechCompleted: any = null;
-  let reflectCompleted: any = null;
+  // Second parallel batch — these depend on the children/selected child resolved
+  // above, but don't depend on each other, so run them together too.
+  const [{ data: allCompleted }, { data: premiumSpeech }] = await Promise.all([
+    childrenList.length > 0
+      ? supabaseAdmin
+          .from('assessments')
+          .select('child_id, module')
+          .in('child_id', childrenList.map((c) => c.id))
+          .eq('status', 'completed')
+      : Promise.resolve({ data: [] as any[] }),
+    selectedChild
+      ? supabaseAdmin
+          .from('eval_sessions')
+          .select('*')
+          .eq('child_id', selectedChild.id)
+          .eq('module', 'mod_speech_basic')
+          .eq('status', 'completed')
+          .order('completed_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
 
-  if (selectedChild) {
-    const { data: premiumSpeech } = await supabaseAdmin
-      .from('eval_sessions')
-      .select('*')
-      .eq('child_id', selectedChild.id)
-      .eq('module', 'mod_speech_basic')
-      .eq('status', 'completed')
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    speechCompleted = premiumSpeech;
+  // Completed-module counts per child (distinct modules) — drives the list + progress
+  const completedByChild: Record<number, Set<string>> = {};
+  (allCompleted || []).forEach((a: any) => {
+    const cid = Number(a.child_id);
+    if (!completedByChild[cid]) completedByChild[cid] = new Set<string>();
+    if (a.module) completedByChild[cid].add(a.module);
+  });
 
-    const { data: premiumReflect } = await supabaseAdmin
-      .from('parent_reflect_sessions')
-      .select('*')
-      .eq('parent_id', user.id)
-      .eq('status', 'completed')
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    reflectCompleted = premiumReflect;
-  }
+  const speechCompleted: any = premiumSpeech;
 
   const selectedDoneCount = selectedChild ? (completedByChild[Number(selectedChild.id)]?.size || 0) : 0;
   const selectedPct = Math.round((selectedDoneCount / TOTAL_MODULES) * 100);

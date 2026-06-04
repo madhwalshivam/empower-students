@@ -94,34 +94,39 @@ export default async function PartnerDashboardPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-8 animate-fade-in">
-      {/* Welcome Banner */}
-      <section className="bg-gradient-to-r from-indigo-600 to-violet-700 text-white rounded-3xl p-6 sm:p-8 shadow-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
+      {/* Welcome Banner — gradient set inline because the Tailwind gradient
+          utilities aren't compiled in this project (no Tailwind build step);
+          this matches the inline-gradient idiom used elsewhere in the app. */}
+      <section
+        className="text-white rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6"
+        style={{
+          background: 'linear-gradient(135deg, #4f46e5, #7c3aed)',
+          boxShadow: '0 18px 40px -12px rgba(79,70,229,0.45)',
+        }}
+      >
         <div>
-          <span className="bg-white/20 text-white text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+          <span
+            className="text-white text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider"
+            style={{ background: 'rgba(255,255,255,0.18)' }}
+          >
             Partner Portal
           </span>
-          <h1 className="text-3xl font-extrabold mt-2 tracking-tight">
+          <h1 className="text-3xl font-extrabold mt-2 tracking-tight text-white">
             Welcome back, {partner.name}!
           </h1>
-          <p className="text-indigo-100 text-sm mt-1">
+          <p className="text-sm mt-1" style={{ color: '#e0e7ff' }}>
             Track your referrals, manage your clients, and view your revenue share payments.
           </p>
         </div>
         <div className="flex items-center gap-3">
           <Link
             href="/partner/add-family"
-            className="bg-white text-indigo-700 hover:bg-slate-55 shadow-md font-bold px-5 py-3 rounded-2xl text-sm flex items-center gap-1.5 transition-all cursor-pointer border-0"
+            className="text-indigo-700 shadow-md font-bold px-5 py-3 rounded-2xl text-sm flex items-center gap-1.5 transition-all cursor-pointer border-0"
+            style={{ background: '#ffffff' }}
           >
             <Plus size={16} /> Register Family
           </Link>
-          <form action="/api/auth/signout" method="POST">
-            <button
-              type="submit"
-              className="bg-transparent border border-white/30 text-white hover:bg-white/10 font-bold px-4 py-3 rounded-2xl text-sm flex items-center gap-1.5 transition-all cursor-pointer"
-            >
-              <LogOut size={16} /> Logout
-            </button>
-          </form>
+          
         </div>
       </section>
 
@@ -168,7 +173,10 @@ export default async function PartnerDashboardPage() {
       </section>
 
       {/* Referral Link & Social Sharing */}
-      <section className="bg-emerald-50/50 dark:bg-slate-950/20 border-2 border-emerald-200/60 rounded-3xl p-6 sm:p-8 space-y-6">
+      <section
+        className="rounded-3xl p-6 sm:p-8 space-y-6"
+        style={{ background: '#ecfdf5', border: '1.5px solid #a7f3d0' }}
+      >
         <div>
           <h2 className="text-xl font-bold text-slate-850 dark:text-slate-100 flex items-center gap-2">
             <span>🔗 Your Referral Marketing Tool</span>
