@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -73,6 +73,7 @@ export default function SpeechEvalPage() {
 
   // Wallet logic
   const [insufficientCredits, setInsufficientCredits] = useState<any>(null);
+  const [hasPaidSession, setHasPaidSession] = useState(false);
 
   // Live Interview State
   const [transcript, setTranscript] = useState('');
@@ -111,9 +112,11 @@ export default function SpeechEvalPage() {
       //    FREE. Parent already paid; startSpeechEvalSession now skips the charge
       //    when a prior cost_paid > 0 session exists for this child.
       const sessionRes = await getLatestSpeechSession(childId);
-      const hasPaidSession = !('error' in sessionRes) &&
+      const isPaid = !('error' in sessionRes) &&
         (sessionRes.status === 'in_progress' || sessionRes.status === 'abandoned');
-      if (hasPaidSession) {
+      setHasPaidSession(isPaid);
+      
+      if (isPaid) {
         setScreen('loading');
         const resumed = await startSpeechEvalSession(childId);
         if (!('error' in resumed)) {
@@ -233,20 +236,14 @@ export default function SpeechEvalPage() {
         setStatusMessage('Listening to your child...');
         audioStartTimeRef.current = Date.now();
       };
-
       rec.onresult = (event: any) => {
         let finalTrans = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           finalTrans += event.results[i][0].transcript;
         }
         setTranscript(finalTrans);
-        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-        silenceTimerRef.current = setTimeout(() => {
-          handleDoneSpeaking(finalTrans);
-        }, 3000);
-      };
-
-      rec.onerror = (e: any) => {
+        setManualInput(finalTrans);
+      };      rec.onerror = (e: any) => {
         if (recognitionRef.current !== rec) return; // stale rec from previous session — ignore
         isListeningRef.current = false;
         setIsListening(false);
@@ -304,6 +301,7 @@ export default function SpeechEvalPage() {
         setScreen('gate');
       }
     } else {
+      setHasPaidSession(true);
       setSession({ id: res.session_id });
       setCurrentQuestion(res.question);
       setScreen('interview');
@@ -323,7 +321,7 @@ export default function SpeechEvalPage() {
       setScreen('gate');
       return;
     }
-    const finalVal = (finalTranscript !== undefined ? finalTranscript : transcript || manualInput).trim();
+    const finalVal = (finalTranscript !== undefined ? finalTranscript : manualInput || transcript).trim();
     if (!finalVal) {
       setStatusMessage('Please speak or type an answer to continue.');
       return;
@@ -374,11 +372,10 @@ export default function SpeechEvalPage() {
     }
   };
 
-  const handleCancel = async () => {
-    if (window.confirm('Are you sure you want to end this evaluation early? Your current progress will not be saved.')) {
-      if (session?.id) {
-        await cancelSpeechSession(session.id);
-      }
+  const handleExitAndResume = () => {
+    if (window.confirm('Do you want to save your progress and exit? You can resume this evaluation later.')) {
+      try { recognitionRef.current?.stop(); } catch {}
+      window.speechSynthesis?.cancel();
       router.push('/dashboard');
     }
   };
@@ -463,15 +460,27 @@ export default function SpeechEvalPage() {
             </div>
           )}
 
-          <div className="bg-indigo-50 dark:bg-slate-950 border border-indigo-100 dark:border-slate-800 rounded-2xl p-5 flex items-center justify-between">
-            <div>
-              <p className="text-xs text-indigo-700 dark:text-indigo-400 font-bold uppercase tracking-wider">Evaluation Fee</p>
-              <p className="text-2xl font-black text-slate-800 dark:text-slate-100 mt-0.5">₹1,000</p>
+          {hasPaidSession ? (
+            <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-250 text-emerald-800 dark:text-emerald-450 text-sm rounded-2xl p-4 flex items-start gap-2.5 shadow-sm">
+              <CheckCircle2 className="shrink-0 text-emerald-650 mt-0.5" size={18} />
+              <div>
+                <p className="font-bold text-emerald-900 dark:text-emerald-400">Evaluation Session Active</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  You have already purchased this evaluation. You can resume it now for free.
+                </p>
+              </div>
             </div>
-            <div className="text-right">
-              <span className="text-[10px] text-slate-400 uppercase tracking-widest block font-bold">Charged at start</span>
+          ) : (
+            <div className="bg-indigo-50 dark:bg-slate-950 border border-indigo-100 dark:border-slate-800 rounded-2xl p-5 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-indigo-700 dark:text-indigo-400 font-bold uppercase tracking-wider">Evaluation Fee</p>
+                <p className="text-2xl font-black text-slate-800 dark:text-slate-100 mt-0.5">₹1,000</p>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] text-slate-400 uppercase tracking-widest block font-bold">Charged at start</span>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="border-t border-slate-100 dark:border-slate-850 pt-6 flex flex-col sm:flex-row gap-3 items-center justify-between">
             <Link href="/dashboard" className="text-slate-400 hover:text-slate-600 text-sm font-bold flex items-center gap-1">
@@ -481,7 +490,7 @@ export default function SpeechEvalPage() {
               onClick={handleStart}
               className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-8 py-3.5 rounded-2xl shadow-lg hover:scale-[1.02] transition-all flex items-center gap-2 w-full sm:w-auto justify-center"
             >
-              <Play size={16} /> Start Evaluation
+              <Play size={16} /> {hasPaidSession ? 'Resume Evaluation' : 'Start Evaluation'}
             </button>
           </div>
         </div>
@@ -553,70 +562,62 @@ export default function SpeechEvalPage() {
                   </p>
                 </div>
               )}
-
-              {/* Manual Typable fallback */}
-              {showManualInput && (
-                <div className="w-full space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/80">
-                  <label className="block text-xs text-left font-bold text-slate-400 uppercase">
-                    Type Answer Fallback
-                  </label>
-                  <input
-                    type="text"
-                    value={manualInput}
-                    onChange={(e) => setManualInput(e.target.value)}
-                    placeholder="Type what the child answered..."
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 outline-none focus:border-indigo-500 text-sm"
-                  />
-                </div>
-              )}
             </div>
 
             {/* Actions */}
-            <div className="w-full pt-6 border-t border-slate-50 dark:border-slate-850 space-y-3">
-              {/* Keyboard input — always visible so user can always type */}
-              <div className="flex items-center gap-2">
+            <div className="w-full pt-6 border-t border-slate-100 dark:border-slate-800/80 space-y-4">
+              {/* Keyboard input with inline mic toggle — always visible and responsive */}
+              <div className="relative flex items-center w-full">
                 <input
                   type="text"
                   value={manualInput}
                   onChange={(e) => setManualInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && manualInput.trim()) handleDoneSpeaking(); }}
-                  placeholder="Type answer here (or speak below)…"
-                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 outline-none focus:border-indigo-500 text-sm"
+                  placeholder={isListening ? "Listening... Speak now..." : "Type answer here (or tap mic to speak)..."}
+                  style={{ paddingRight: '48px' }}
+                  className={`flex-1 pl-4 py-3 rounded-2xl border ${isListening ? 'border-rose-500 bg-rose-50/10 dark:bg-rose-950/10 animate-pulse' : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950'} text-slate-800 dark:text-slate-200 outline-none focus:border-indigo-500 text-sm transition-all duration-200`}
                 />
                 <button
-                  onClick={() => handleDoneSpeaking()}
-                  disabled={!manualInput.trim() && !transcript}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2.5 px-5 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                  onClick={() => {
+                    if (isListening) {
+                      stopListening();
+                    } else {
+                      startListening();
+                    }
+                  }}
+                  type="button"
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', zIndex: 10 }}
+                  className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 ${isListening ? 'bg-rose-500 text-white shadow-md' : 'bg-slate-100 dark:bg-slate-800 text-slate-650 dark:text-slate-450 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+                  title={isListening ? "Stop listening" : "Start speaking"}
                 >
-                  Submit
+                  {isListening ? <MicOff size={15} /> : <Mic size={15} />}
                 </button>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-3 w-full">
                 <button
                   onClick={() => speakPrompt(currentQuestion.prompt)}
-                  className="flex-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-bold text-xs py-3 px-4 rounded-xl transition"
+                  className="flex-1 bg-slate-150 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-extrabold text-xs py-3.5 px-4 rounded-xl transition"
                 >
-                  🔊 Hear Again
+                  🔊 Hear Question Again
                 </button>
-                {/* Done Speaking — enabled once mic has captured something OR user typed */}
                 <button
                   onClick={() => handleDoneSpeaking()}
-                  disabled={!transcript && !manualInput.trim()}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 px-4 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 justify-center"
+                  disabled={!manualInput.trim()}
+                  className="flex-1 bg-indigo-650 hover:bg-indigo-700 text-white font-extrabold text-xs py-3.5 px-4 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-indigo-600/15"
                 >
-                  <Check size={14} /> Done Speaking
+                  Submit Answer
                 </button>
               </div>
             </div>
           </div>
 
-          {/* End eval early */}
+          {/* Pause / Resume early */}
           <div className="text-center">
             <button
-              onClick={handleCancel}
-              className="text-xs text-rose-500 hover:text-rose-700 font-bold underline"
+              onClick={handleExitAndResume}
+              className="text-xs text-indigo-650 hover:text-indigo-850 font-bold underline"
             >
-              End Evaluation Early
+              Pause & Exit (Resume Later)
             </button>
           </div>
         </div>

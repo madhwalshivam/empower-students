@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { resetEvaluationAction } from '@/app/actions/child';
 import { unlockCarePackAction } from '@/app/actions/carepack';
 import { unlockSpeechEvalAction } from '@/app/actions/speech';
+import { unlockReflectAction } from '@/app/actions/reflect';
 import {
   ArrowLeft,
   Heart,
@@ -32,6 +33,7 @@ import {
   X,
   Loader2,
   Mic,
+  HeartHandshake,
 } from 'lucide-react';
 
 const CARE_PACK_PRICE = 499;
@@ -44,6 +46,9 @@ interface ChildDetailClientProps {
   parentCredits: number;
   inProgressModules?: string[];
   speechUnlocked?: boolean;
+  reflectUnlocked?: boolean;
+  speechSession?: any;
+  reflectSession?: any;
 }
 
 export default function ChildDetailClient({
@@ -54,6 +59,9 @@ export default function ChildDetailClient({
   parentCredits,
   inProgressModules = [],
   speechUnlocked = false,
+  reflectUnlocked = false,
+  speechSession = null,
+  reflectSession = null,
 }: ChildDetailClientProps) {
   const router = useRouter();
   const [resetLoading, setResetLoading] = useState(false);
@@ -69,6 +77,11 @@ export default function ChildDetailClient({
   const [showSpeechUnlock, setShowSpeechUnlock] = useState(false);
   const [speechUnlocking, setSpeechUnlocking] = useState(false);
   const [speechUnlockError, setSpeechUnlockError] = useState('');
+
+  // Reflect eval unlock modal
+  const [showReflectUnlock, setShowReflectUnlock] = useState(false);
+  const [reflectUnlocking, setReflectUnlocking] = useState(false);
+  const [reflectUnlockError, setReflectUnlockError] = useState('');
 
   const handleSpeechUnlock = async () => {
     setSpeechUnlocking(true);
@@ -87,6 +100,26 @@ export default function ChildDetailClient({
       setSpeechUnlockError(err.message || 'Something went wrong.');
     } finally {
       setSpeechUnlocking(false);
+    }
+  };
+
+  const handleReflectUnlock = async () => {
+    setReflectUnlocking(true);
+    setReflectUnlockError('');
+    try {
+      const res = await unlockReflectAction(Number(child.id));
+      if (res.ok) {
+        setShowReflectUnlock(false);
+        router.refresh();
+      } else if (res.insufficient) {
+        setReflectUnlockError(`You need ${res.need} credits but have only ${res.balance}. Please top up.`);
+      } else {
+        setReflectUnlockError(res.error || 'Could not unlock.');
+      }
+    } catch (err: any) {
+      setReflectUnlockError(err.message || 'Something went wrong.');
+    } finally {
+      setReflectUnlocking(false);
     }
   };
 
@@ -110,8 +143,10 @@ export default function ChildDetailClient({
     }
   };
 
-  const completedCount = assessments.length;
-  const totalModules = 8;
+  const completedCount = assessments.length +
+    (speechSession && speechSession.status === 'completed' ? 1 : 0) +
+    (reflectSession && reflectSession.status === 'completed' ? 1 : 0);
+  const totalModules = 10;
   const progressPct = Math.round((completedCount / totalModules) * 100);
 
   const allModules = [
@@ -123,6 +158,8 @@ export default function ChildDetailClient({
     { key: 'math', label: 'Maths Level', icon: Binary, desc: 'Adaptive fundamental number sense finder', color: '#10b981' },
     { key: 'language', label: 'Language & Reading', icon: BookOpen, desc: 'Word-power and timed comprehension checks', color: '#3b82f6' },
     { key: 'diet', label: 'Diet & Nutrition', icon: Apple, desc: 'Tuned child food chart and sleep plan', color: '#84cc16' },
+    { key: 'speech', label: 'Speech & Language', icon: Mic, desc: 'Adaptive voice evaluation for articulation and fluency', color: '#4f46e5' },
+    { key: 'reflect', label: 'Parent Reflection', icon: HeartHandshake, desc: 'Private guided voice reflection & burden index', color: '#6366f1' },
   ];
 
   const handleReset = async () => {
@@ -280,7 +317,7 @@ export default function ChildDetailClient({
 
       {/* Care Pack Active state */}
       {carePackUnlocked && (
-        <div style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: 24, padding: '24px 28px' }}>
+        <div style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: 24, padding: '24px 28px', marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
             <Trophy size={20} color="#059669" />
             <h3 style={{ fontSize: 16, fontWeight: 800, color: '#065f46', margin: 0 }}>{child.name}'s Care Pack — Active</h3>
@@ -313,43 +350,28 @@ export default function ChildDetailClient({
           </span>
         </div>
 
-        {/* ── Premium Clinical Services ── */}
-        <div style={{ background: '#fff', border: '1px solid #f1f5f9', borderRadius: 20, padding: '20px 24px', boxShadow: '0 2px 12px rgba(0,0,0,0.04)', marginBottom: 16 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 800, color: '#1e293b', margin: '0 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Sparkles size={17} color="#4f46e5" /> Premium Clinical Services
-          </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-            {/* Speech & Language */}
-            {speechUnlocked ? (
-              <Link href={`/eval-speech/${child.id}`} style={{ background: 'linear-gradient(135deg,#f0fdf4,#ecfdf5)', border: '1.5px solid #a7f3d0', borderRadius: 16, padding: '16px 18px', textDecoration: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 800, fontSize: 13, color: '#065f46' }}>Speech &amp; Language</span>
-                  <span style={{ background: '#059669', color: '#fff', fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 99 }}>Unlocked</span>
-                </div>
-                <span style={{ fontSize: 12, color: '#059669', fontWeight: 700 }}>Open Evaluation →</span>
-              </Link>
-            ) : (
-              <div style={{ background: '#fafafa', border: '1px solid #e2e8f0', borderRadius: 16, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 800, fontSize: 13, color: '#1e293b' }}>Speech &amp; Language</span>
-                  <span style={{ background: '#eef2ff', color: '#4338ca', fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 99 }}>₹1,000</span>
-                </div>
-                <p style={{ fontSize: 12, color: '#64748b', margin: 0, lineHeight: 1.5 }}>Adaptive voice evaluation — articulation, fluency, comprehension.</p>
-                <button
-                  onClick={() => { setSpeechUnlockError(''); setShowSpeechUnlock(true); }}
-                  style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', color: '#fff', border: 'none', borderRadius: 12, padding: '9px', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-                >
-                  <Lock size={14} /> Unlock for {child.name}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
           {allModules.map((m) => {
-            const completed = assessments.find((a) => a.module === m.key && a.status === 'completed');
-            const inProgress = !completed && inProgressModules.includes(m.key);
+            const isPremium = m.key === 'speech' || m.key === 'reflect';
+            const unlocked = m.key === 'speech' ? speechUnlocked : m.key === 'reflect' ? reflectUnlocked : true;
+
+            let completed = null;
+            let inProgress = false;
+            let startLink = `/eval/${child.id}/${m.key}`;
+
+            if (m.key === 'speech') {
+              completed = speechSession && speechSession.status === 'completed' ? speechSession : null;
+              inProgress = speechSession && speechSession.status === 'in_progress';
+              startLink = `/eval-speech/${child.id}`;
+            } else if (m.key === 'reflect') {
+              completed = reflectSession && reflectSession.status === 'completed' ? reflectSession : null;
+              inProgress = reflectSession && reflectSession.status === 'in_progress';
+              startLink = `/parent-reflect?cid=${child.id}`;
+            } else {
+              completed = assessments.find((a) => a.module === m.key && a.status === 'completed');
+              inProgress = !completed && inProgressModules.includes(m.key);
+            }
+
             const IconComponent = m.icon;
 
             return (
@@ -357,7 +379,7 @@ export default function ChildDetailClient({
                 key={m.key}
                 style={{
                   background: '#fff',
-                  border: `1px solid ${completed ? '#d1fae5' : inProgress ? '#fde68a' : '#f1f5f9'}`,
+                  border: `1px solid ${!unlocked ? '#e2e8f0' : completed ? '#d1fae5' : inProgress ? '#fde68a' : '#f1f5f9'}`,
                   borderRadius: 20,
                   padding: '20px 22px',
                   boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
@@ -367,12 +389,13 @@ export default function ChildDetailClient({
                   transition: 'box-shadow 0.2s, transform 0.2s',
                   position: 'relative',
                   overflow: 'hidden',
+                  opacity: !unlocked ? 0.85 : 1,
                 }}
               >
                 {/* Status indicator bar */}
-                {completed ? (
+                {unlocked && completed ? (
                   <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #10b981, #34d399)' }} />
-                ) : inProgress ? (
+                ) : unlocked && inProgress ? (
                   <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #f59e0b, #fbbf24)' }} />
                 ) : null}
 
@@ -395,14 +418,45 @@ export default function ChildDetailClient({
 
                 {/* Status + CTA */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 14, borderTop: '1px solid #f8fafc' }}>
-                  {completed ? (
+                  {!unlocked ? (
+                    <>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: '#4f46e5' }}>
+                        <Lock size={15} />
+                        Locked (₹1,000)
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (m.key === 'speech') {
+                            setSpeechUnlockError('');
+                            setShowSpeechUnlock(true);
+                          } else {
+                            setReflectUnlockError('');
+                            setShowReflectUnlock(true);
+                          }
+                        }}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          fontSize: 13, fontWeight: 800, color: '#fff',
+                          background: 'linear-gradient(135deg, #4f46e5, #7c3aed)',
+                          padding: '8px 18px', borderRadius: 12,
+                          border: 'none',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 12px rgba(99,102,241,0.3)',
+                        }}
+                      >
+                        Unlock
+                      </button>
+                    </>
+                  ) : completed ? (
                     <>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: '#059669' }}>
                         <CheckCircle2 size={15} />
-                        Done{completed.score !== null ? ` · ${completed.score}/100` : ''}
+                        Done
+                        {m.key === 'speech' && completed.final_level !== undefined ? ` · L${completed.final_level}` : ''}
+                        {m.key !== 'speech' && m.key !== 'reflect' && completed.score !== null ? ` · ${completed.score}/100` : ''}
                       </span>
                       <Link
-                        href={`/eval/${child.id}/${m.key}`}
+                        href={startLink}
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, color: '#6366f1', background: '#ede9fe', padding: '6px 14px', borderRadius: 10, textDecoration: 'none' }}
                       >
                         <RefreshCw size={12} /> Redo
@@ -415,7 +469,7 @@ export default function ChildDetailClient({
                         In progress
                       </span>
                       <Link
-                        href={`/eval/${child.id}/${m.key}`}
+                        href={startLink}
                         style={{
                           display: 'inline-flex', alignItems: 'center', gap: 6,
                           fontSize: 13, fontWeight: 800, color: '#fff',
@@ -435,7 +489,7 @@ export default function ChildDetailClient({
                         Not started
                       </span>
                       <Link
-                        href={`/eval/${child.id}/${m.key}`}
+                        href={startLink}
                         style={{
                           display: 'inline-flex', alignItems: 'center', gap: 6,
                           fontSize: 13, fontWeight: 800, color: '#fff',
@@ -552,6 +606,64 @@ export default function ChildDetailClient({
                   style={{ flex: 1.4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: speechUnlocking || parentCredits < 1000 ? '#c7d2fe' : 'linear-gradient(135deg,#4f46e5,#7c3aed)', color: '#fff', padding: '12px', borderRadius: 14, fontWeight: 800, fontSize: 14, border: 'none', cursor: speechUnlocking || parentCredits < 1000 ? 'not-allowed' : 'pointer' }}
                 >
                   {speechUnlocking ? <><Loader2 size={15} className="animate-spin" /> Unlocking…</> : <><Mic size={15} /> Yes, unlock</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reflect Eval Unlock Modal ── */}
+      {showReflectUnlock && (
+        <div
+          onClick={() => !reflectUnlocking && setShowReflectUnlock(false)}
+          style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 24, width: '100%', maxWidth: 420, boxShadow: '0 24px 60px rgba(0,0,0,0.3)', overflow: 'hidden' }}>
+            <div style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', padding: '24px 28px', color: '#fff', position: 'relative' }}>
+              <button onClick={() => !reflectUnlocking && setShowReflectUnlock(false)} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 10, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}>
+                <X size={16} />
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <HeartHandshake size={18} />
+                <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.85 }}>Unlock Parent Reflection</span>
+              </div>
+              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Unlock for {child.name}?</h3>
+            </div>
+            <div style={{ padding: '24px 28px' }}>
+              <p style={{ margin: '0 0 18px', fontSize: 14, color: '#475569', lineHeight: 1.6 }}>
+                Do you want to unlock <strong>Parent Reflection Evaluation</strong> for {child.name}? This is a <strong>one-time unlock</strong> — you can retake the evaluation as many times as you need.
+              </p>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 16, padding: '16px 18px', marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>Amount</span>
+                  <span style={{ fontSize: 20, fontWeight: 900, color: '#4f46e5' }}>1,000 credits</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>Your balance</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: parentCredits >= 1000 ? '#059669' : '#dc2626' }}>
+                    {parentCredits} credits
+                  </span>
+                </div>
+              </div>
+              {parentCredits < 1000 && (
+                <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontWeight: 600, marginBottom: 16 }}>
+                  Not enough credits. <Link href="/wallet?need=1000" style={{ color: '#9a3412', fontWeight: 800 }}>Top up →</Link>
+                </div>
+              )}
+              {reflectUnlockError && (
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontWeight: 600, marginBottom: 16 }}>
+                  {reflectUnlockError}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => setShowReflectUnlock(false)} disabled={reflectUnlocking} style={{ flex: 1, background: '#f1f5f9', color: '#475569', padding: '12px', borderRadius: 14, fontWeight: 800, fontSize: 14, border: 'none', cursor: 'pointer' }}>Cancel</button>
+                <button
+                  onClick={handleReflectUnlock}
+                  disabled={reflectUnlocking || parentCredits < 1000}
+                  style={{ flex: 1.4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: reflectUnlocking || parentCredits < 1000 ? '#c7d2fe' : 'linear-gradient(135deg,#4f46e5,#7c3aed)', color: '#fff', padding: '12px', borderRadius: 14, fontWeight: 800, fontSize: 14, border: 'none', cursor: reflectUnlocking || parentCredits < 1000 ? 'not-allowed' : 'pointer' }}
+                >
+                  {reflectUnlocking ? <><Loader2 size={15} className="animate-spin" /> Unlocking…</> : <><HeartHandshake size={15} /> Yes, unlock</>}
                 </button>
               </div>
             </div>

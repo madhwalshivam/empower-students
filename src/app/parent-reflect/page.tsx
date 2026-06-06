@@ -29,6 +29,7 @@ import {
   discardReflectSession,
   getReflectSessionReport,
   getLatestReflectReport,
+  getLatestReflectReportForChild,
 } from '@/app/actions/reflect';
 
 // Simple markdown-to-HTML parser for safety and styling
@@ -89,6 +90,7 @@ export default function ParentReflectPage() {
   const [manualInput, setManualInput] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
   const [lastReflection, setLastReflection] = useState<string | null>(null);
+  const [childId, setChildId] = useState<number | null>(null);
 
   // Refs
   const recognitionRef = useRef<any>(null);
@@ -99,14 +101,22 @@ export default function ParentReflectPage() {
   // returning parent never sees the pay-gate for something they already paid for.
   useEffect(() => {
     (async () => {
-      const existing = await getLatestReflectReport();
-      if (!('error' in existing) && existing.parent_summary_md) {
-        setReport(existing);
-        setScreen('report');
-        return;
+      const params = new URLSearchParams(window.location.search);
+      const cidStr = params.get('cid');
+      const cid = cidStr ? Number(cidStr) : null;
+      setChildId(cid);
+
+      if (cid) {
+        const existing = await getLatestReflectReportForChild(cid);
+        if (!('error' in existing) && existing.parent_summary_md) {
+          setReport(existing);
+          setScreen('report');
+          return;
+        }
+      } else {
+        setError('No child context provided. Please select a child from the dashboard.');
       }
-      // No completed report — land on the landing screen (existing in_progress
-      // sessions are auto-resumed by startReflectSession when they click Begin).
+
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (!SpeechRecognition) {
         setError('Web speech synthesis or mic inputs are not fully supported on this browser. You can still type your answers.');
@@ -152,17 +162,14 @@ export default function ParentReflectPage() {
       utterance.onstart = () => setIsSpeaking(true);
       utterance.onend = () => {
         setIsSpeaking(false);
-        startListening();
       };
       utterance.onerror = () => {
         setIsSpeaking(false);
-        startListening();
       };
       window.speechSynthesis.speak(utterance);
     } catch (e) {
       console.error('TTS failed:', e);
       setIsSpeaking(false);
-      startListening();
     }
   };
 
@@ -189,12 +196,7 @@ export default function ParentReflectPage() {
           finalTrans += event.results[i][0].transcript;
         }
         setTranscript(finalTrans);
-
-        // Speech pause timeout (3.5 seconds of silence = submit)
-        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-        silenceTimerRef.current = setTimeout(() => {
-          handleSubmitAnswer(finalTrans);
-        }, 3500);
+        setManualInput(finalTrans);
       };
 
       rec.onerror = (e: any) => {
@@ -231,11 +233,15 @@ export default function ParentReflectPage() {
   };
 
   const handleBegin = async () => {
+    if (!childId) {
+      setError('No child context found.');
+      return;
+    }
     setScreen('loading');
     setError(null);
     setInsufficientCredits(null);
 
-    const res = await startReflectSession();
+    const res = await startReflectSession(childId);
     if ('error' in res) {
       if (res.error === 'insufficient') {
         setInsufficientCredits(res);
@@ -584,83 +590,55 @@ export default function ParentReflectPage() {
                 </div>
               )}
 
-              {/* Live Transcript / Hearing Box */}
-              {isListening && (
-                <div className="w-full bg-rose-50/50 dark:bg-slate-950/60 border border-rose-100 dark:border-slate-800 rounded-2xl p-4 text-left animate-fade-in">
-                  <span className="text-[10px] uppercase font-bold tracking-widest text-rose-650 dark:text-rose-450 block mb-1">
-                    Hearing
-                  </span>
-                  <p className="text-sm text-slate-700 dark:text-slate-300 italic min-h-[1.5rem]">
-                    {transcript || 'Speak naturally now...'}
-                  </p>
-                </div>
-              )}
-
-              {/* Typable fallback */}
-              {showManualInput && (
-                <div className="w-full space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/80">
-                  <label className="block text-xs text-left font-bold text-slate-400 uppercase">
-                    Type Response Fallback
-                  </label>
+              {/* Unified Textarea/Microphone input box */}
+              <div className="w-full pt-4 space-y-3">
+                <div className="relative">
                   <textarea
-                    rows={3}
+                    rows={4}
                     value={manualInput}
                     onChange={(e) => setManualInput(e.target.value)}
-                    placeholder="Type your reflection here..."
-                    className="w-full px-4 py-3 rounded-xl border border-slate-205 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-202 outline-none focus:border-indigo-500 text-sm resize-none"
+                    placeholder={isListening ? "Listening... Speak naturally now..." : "Type your reflection here (or click the microphone to speak)..."}
+                    className={`w-full px-4 py-3 pb-12 rounded-2xl border ${isListening ? 'border-rose-500 bg-rose-50/20 shadow-md shadow-rose-100/20' : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950'} text-slate-800 dark:text-slate-200 outline-none focus:border-indigo-500 text-sm resize-none transition-all duration-200`}
                   />
+                  <div className="absolute right-3 bottom-3 flex items-center gap-2">
+                    {isListening && (
+                      <span className="text-xs text-rose-500 font-semibold animate-pulse mr-1">
+                        Recording...
+                      </span>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (isListening) {
+                          stopListening();
+                        } else {
+                          startListening();
+                        }
+                      }}
+                      type="button"
+                      className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${isListening ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30 hover:bg-rose-600' : 'bg-indigo-50 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-slate-700'}`}
+                      title={isListening ? "Stop listening" : "Start speaking"}
+                    >
+                      {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
 
-            {/* Controls */}
-            <div className="w-full pt-6 flex flex-col sm:flex-row gap-3 items-center justify-center border-t border-slate-55 dark:border-slate-855">
-              {!showManualInput ? (
-                <>
+                <div className="flex gap-2 justify-end">
                   <button
                     onClick={() => speakQuestion(currentTurn.question)}
-                    className="w-full sm:w-auto bg-slate-100 dark:bg-slate-800 hover:bg-slate-205 text-slate-700 dark:text-slate-300 font-bold text-xs py-3 px-5 rounded-xl transition animate-fade-in"
+                    className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-350 font-bold text-xs py-3 px-5 rounded-xl transition"
                   >
                     🔊 Hear AI Again
                   </button>
                   <button
                     onClick={() => handleSubmitAnswer()}
-                    disabled={!transcript}
-                    className="w-full sm:w-auto bg-indigo-650 hover:bg-indigo-750 text-white font-bold text-xs py-3 px-6 rounded-xl transition disabled:opacity-40 flex items-center gap-1.5 justify-center"
-                  >
-                    <Check size={14} /> Done Speaking
-                  </button>
-                  <button
-                    onClick={() => {
-                      stopListening();
-                      setShowManualInput(true);
-                    }}
-                    className="text-xs text-indigo-650 dark:text-indigo-400 font-bold hover:underline mt-2 sm:mt-0"
-                  >
-                    Type Response
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={() => {
-                      setShowManualInput(false);
-                      setManualInput('');
-                      startListening();
-                    }}
-                    className="w-full sm:w-auto bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-750 dark:text-slate-300 font-bold text-xs py-3 px-5 rounded-xl transition"
-                  >
-                    🎙️ Use Microphone
-                  </button>
-                  <button
-                    onClick={() => handleSubmitAnswer()}
                     disabled={!manualInput.trim()}
-                    className="w-full sm:w-auto bg-indigo-650 hover:bg-indigo-755 text-white font-bold text-xs py-3 px-6 rounded-xl transition disabled:opacity-40"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-3 px-6 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 justify-center shadow-md shadow-indigo-600/20"
                   >
-                    Submit Response
+                    Submit Answer
                   </button>
-                </>
-              )}
+                </div>
+              </div>
             </div>
 
           </div>

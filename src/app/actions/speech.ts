@@ -8,11 +8,15 @@ import fs from 'fs';
 import path from 'path';
 
 const SPEECH_PRICE = 1000; // 1000 credits
-const HAIKU_MODEL = 'claude-3-5-haiku-20241022';
-const SONNET_MODEL = 'claude-3-5-sonnet-20241022';
+const HAIKU_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
+const SONNET_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
 
 // Canned question bank matching PHP includes/eval_engine.php
-function getCannedQuestion(level: number, isHindi: boolean): { type: string; prompt: string; expected: string } {
+function getCannedQuestion(
+  level: number,
+  isHindi: boolean,
+  askedPrompts: string[] = []
+): { type: string; prompt: string; expected: string } {
   const bank: Record<number, { en: Array<{type: string, prompt: string, expected: string}>, hi: Array<{type: string, prompt: string, expected: string}> }> = {
     1: {
       en: [
@@ -21,6 +25,10 @@ function getCannedQuestion(level: number, isHindi: boolean): { type: string; pro
         { type: 'naming', prompt: 'What red round fruit do we eat?', expected: 'apple|seb' },
         { type: 'naming', prompt: 'What animal says "woof woof"?', expected: 'dog|kutta|puppy' },
         { type: 'naming', prompt: 'Tell me — what do we wear on our feet?', expected: 'shoes|chappal|slippers|socks|joote' },
+        { type: 'naming', prompt: 'What is the color of the sky?', expected: 'blue|neela|neela rang' },
+        { type: 'naming', prompt: 'What do we use to see with our eyes?', expected: 'eyes|seeing|spectacles|aankh' },
+        { type: 'naming', prompt: 'What animal has a long trunk and is very big?', expected: 'elephant|haathi' },
+        { type: 'naming', prompt: 'Which body part do we use to hear sound?', expected: 'ears|ear|kaan' },
       ],
       hi: [
         { type: 'naming', prompt: 'बच्चे, कौन-सा जानवर "म्याऊँ-म्याऊँ" करता है?', expected: 'बिल्ली|cat|billi' },
@@ -28,6 +36,10 @@ function getCannedQuestion(level: number, isHindi: boolean): { type: string; pro
         { type: 'naming', prompt: 'लाल गोल मीठा फल कौन-सा होता है?', expected: 'सेब|apple|seb' },
         { type: 'naming', prompt: 'कौन-सा जानवर "भौं-भौं" करता है?', expected: 'कुत्ता|dog|kutta' },
         { type: 'naming', prompt: 'पैरों में हम क्या पहनते हैं?', expected: 'जूते|चप्पल|shoes|joote|chappal' },
+        { type: 'naming', prompt: 'आसमान का रंग कैसा होता है?', expected: 'नीला|blue|neela' },
+        { type: 'naming', prompt: 'हाथ में कितनी उंगलियां होती हैं?', expected: 'पांच|five|paanch' },
+        { type: 'naming', prompt: 'कौन सा बड़ा जानवर है जिसकी एक लंबी सूंड होती है?', expected: 'हाथी|elephant|haathi' },
+        { type: 'naming', prompt: 'हम अपने कानों से क्या करते हैं?', expected: 'सुनते|सुनना|hear|listen' },
       ],
     },
     2: {
@@ -37,6 +49,10 @@ function getCannedQuestion(level: number, isHindi: boolean): { type: string; pro
         { type: 'naming', prompt: 'What do we use to write on paper?', expected: 'pen|pencil|kalam' },
         { type: 'naming', prompt: 'When it rains, what do we hold over our head?', expected: 'umbrella|chhata|chhatri' },
         { type: 'naming', prompt: 'What animal lives in water and swims?', expected: 'fish|machhli' },
+        { type: 'naming', prompt: 'What do we brush our teeth with?', expected: 'toothbrush|brush|paste' },
+        { type: 'naming', prompt: 'Which animal is known as the king of the jungle?', expected: 'lion|sher' },
+        { type: 'naming', prompt: 'What do we sleep on at night?', expected: 'bed|pillow|bistar|gadda' },
+        { type: 'naming', prompt: 'What do you use to cut paper or thread?', expected: 'scissors|scissor' },
       ],
       hi: [
         { type: 'naming', prompt: 'सुबह नाश्ते में हम क्या खाते हैं?', expected: 'रोटी|पराठा|दूध|breakfast|paratha|roti' },
@@ -44,6 +60,10 @@ function getCannedQuestion(level: number, isHindi: boolean): { type: string; pro
         { type: 'naming', prompt: 'काग़ज़ पर लिखने के लिए हम क्या इस्तेमाल करते हैं?', expected: 'पेंसिल|पेन|कलम|pencil|pen' },
         { type: 'naming', prompt: 'जब बारिश होती है, तो सिर के ऊपर हम क्या रखते हैं?', expected: 'छाता|छतरी|umbrella' },
         { type: 'naming', prompt: 'पानी में रहने वाला जानवर जो तैरता है — वो कौन है?', expected: 'मछली|fish|machhli' },
+        { type: 'naming', prompt: 'दांत साफ़ करने के लिए हम क्या इस्तेमाल करते हैं?', expected: 'ब्रश|पेस्ट|brush|toothpaste' },
+        { type: 'naming', prompt: 'जंगल का राजा किस जानवर को कहा जाता है?', expected: 'शेर|lion|sher' },
+        { type: 'naming', prompt: 'रात को हम किस चीज़ पर सोते हैं?', expected: 'बिस्तर|खाट|bed|bistar' },
+        { type: 'naming', prompt: 'काग़ज़ काटने के लिए हम क्या इस्तेमाल करते हैं?', expected: 'कैंची|scissors|kainchi' },
       ],
     },
     3: {
@@ -53,6 +73,10 @@ function getCannedQuestion(level: number, isHindi: boolean): { type: string; pro
         { type: 'naming', prompt: 'Where do cars and buses run? Tell me.', expected: 'road|street|sadak|highway' },
         { type: 'naming', prompt: 'What do we do at night when we feel sleepy?', expected: 'sleep|sona|rest|go to bed' },
         { type: 'naming', prompt: 'Name any one fruit that is yellow.', expected: 'banana|kela|mango|aam|lemon|nimbu' },
+        { type: 'naming', prompt: 'Which vehicle has two wheels and we pedal it?', expected: 'bicycle|cycle' },
+        { type: 'naming', prompt: 'What do we wear on our hands when it is very cold?', expected: 'gloves|glove|dastaane' },
+        { type: 'naming', prompt: 'Where do we go to study and meet our teachers?', expected: 'school|skool' },
+        { type: 'naming', prompt: 'What shines brightly in the sky during the day?', expected: 'sun|suraj' },
       ],
       hi: [
         { type: 'naming', prompt: 'घर में मम्मी खाना कहाँ बनाती हैं? बताओ।', expected: 'रसोई|किचन|kitchen|rasoi' },
@@ -60,6 +84,10 @@ function getCannedQuestion(level: number, isHindi: boolean): { type: string; pro
         { type: 'naming', prompt: 'गाड़ियाँ और बस कहाँ चलती हैं? बताओ।', expected: 'सड़क|रोड|road|sadak' },
         { type: 'naming', prompt: 'रात को जब नींद आती है, तब हम क्या करते हैं?', expected: 'सोते|सोना|sleep|sona' },
         { type: 'naming', prompt: 'कोई एक पीला फल बताओ।', expected: 'केला|आम|नींबू|banana|mango|kela' },
+        { type: 'naming', prompt: 'दो पहियों वाली गाड़ी जिसे हम पैरों से चलाते हैं, वो क्या है?', expected: 'साइकिल|cycle|bicycle' },
+        { type: 'naming', prompt: 'ठंड में हम अपने हाथों में क्या पहनते हैं?', expected: 'दस्ताने|gloves|dastaane' },
+        { type: 'naming', prompt: 'हम पढ़ाई करने और शिक्षकों से मिलने कहाँ जाते हैं?', expected: 'स्कूल|school' },
+        { type: 'naming', prompt: 'दिन में आसमान में क्या तेज़ी से चमकता है?', expected: 'सूरज|सूरजदेव|सूर्य|sun|suraj' },
       ],
     },
     4: {
@@ -69,6 +97,9 @@ function getCannedQuestion(level: number, isHindi: boolean): { type: string; pro
         { type: 'describe', prompt: 'If your friend is crying, what would you do to make them feel better?', expected: 'hug|talk|share|help|comfort|any kindness' },
         { type: 'describe', prompt: 'Why do we wear an umbrella? Tell me.', expected: 'rain|wet|barish|protection from rain|any reason involving rain' },
         { type: 'describe', prompt: 'Tell me what you did yesterday — anything you remember.', expected: 'any activity|played|ate|watched|any memory' },
+        { type: 'describe', prompt: 'Tell me, what happens if we do not water a small plant?', expected: 'die|wilt|dry|सूख जाएगा' },
+        { type: 'describe', prompt: 'If you see a lot of garbage on the floor, what should you do?', expected: 'dustbin|clean|throw|कचरा पेटी' },
+        { type: 'describe', prompt: 'Tell me how you make a paper boat or a paper plane.', expected: 'fold|paper|making|मोड़ना' },
       ],
       hi: [
         { type: 'describe', prompt: 'सुबह उठकर तुम सबसे पहले क्या करते हो? बताओ।', expected: 'ब्रश|मुँह धोना|नाश्ता|कोई भी सुबह की दिनचर्या' },
@@ -76,6 +107,9 @@ function getCannedQuestion(level: number, isHindi: boolean): { type: string; pro
         { type: 'describe', prompt: 'अगर तुम्हारा दोस्त रो रहा हो, तो तुम उसे क्या करोगे?', expected: 'गले लगाना|बात करना|शेयर|मदद|कोई भी अच्छाई|hug|help' },
         { type: 'describe', prompt: 'हम छाता क्यों लेकर जाते हैं? बताओ।', expected: 'बारिश|भीगना|barish|rain|कोई भी कारण' },
         { type: 'describe', prompt: 'कल तुमने क्या किया? कुछ भी जो तुम्हें याद है, बताओ।', expected: 'कोई भी काम|खेला|खाया|देखा|any memory' },
+        { type: 'describe', prompt: 'अगर हम किसी छोटे पौधे में पानी न डालें, तो क्या होगा?', expected: 'सूख जाएगा|मर जाएगा|die|dry' },
+        { type: 'describe', prompt: 'अगर फ़र्श पर बहुत सारा कचरा पड़ा हो, तो तुम्हें क्या करना चाहिए?', expected: 'कचरा पेटी|साफ़|dustbin|clean' },
+        { type: 'describe', prompt: 'काग़ज़ की नाव या हवाई जहाज़ कैसे बनाते हैं, बताओ।', expected: 'मोड़कर|काग़ज़|fold|paper' },
       ],
     },
     5: {
@@ -85,6 +119,9 @@ function getCannedQuestion(level: number, isHindi: boolean): { type: string; pro
         { type: 'describe', prompt: 'If you could be any animal for one day, which would you be and why?', expected: 'any animal with a reason' },
         { type: 'describe', prompt: 'Tell me about a time you helped someone — what happened?', expected: 'any helping story' },
         { type: 'describe', prompt: 'What is the difference between a fruit and a vegetable?', expected: 'fruit is sweet|vegetable for cooking|any reasonable distinction' },
+        { type: 'describe', prompt: 'Why is it important to brush our teeth two times a day?', expected: 'cavity|germs|clean|healthy|कीड़ा' },
+        { type: 'describe', prompt: 'What would you do if you found a lost pencil in your classroom?', expected: 'teacher|owner|give back|दोस्त को देना' },
+        { type: 'describe', prompt: 'Tell me about your favourite cartoon or movie character and why you like them.', expected: 'cartoon|character|hero|any response' },
       ],
       hi: [
         { type: 'describe', prompt: 'एक छोटी-सी कहानी सुनाओ — एक शेर जंगल में गया।', expected: 'कोई भी सुसंगत कहानी शुरुआत-मध्य-अंत के साथ' },
@@ -92,12 +129,23 @@ function getCannedQuestion(level: number, isHindi: boolean): { type: string; pro
         { type: 'describe', prompt: 'अगर तुम एक दिन के लिए कोई भी जानवर बन सकते, तो कौन-सा और क्यों?', expected: 'कोई भी जानवर कारण के साथ' },
         { type: 'describe', prompt: 'एक बार बताओ जब तुमने किसी की मदद की — क्या हुआ था?', expected: 'कोई भी मदद की कहानी' },
         { type: 'describe', prompt: 'फल और सब्ज़ी में क्या अंतर है?', expected: 'फल मीठा होता है|सब्ज़ी पकाते हैं|कोई भी अंतर' },
+        { type: 'describe', prompt: 'दिन में दो बार ब्रश करना क्यों ज़रूरी है?', expected: 'कीड़ा|साफ़|स्वस्थ|cavity|clean' },
+        { type: 'describe', prompt: 'अगर तुम्हें क्लास में किसी की खोई हुई पेंसिल मिले, तो तुम क्या करोगे?', expected: 'टीचर को देंगे|वापस करेंगे|teacher' },
+        { type: 'describe', prompt: 'अपने पसंदीदा कार्टून या फ़िल्म के किरदार के बारे में बताओ और वो तुम्हें क्यों पसंद है?', expected: 'कार्टून|नायक|hero|cartoon' },
       ],
     },
   };
 
   const cleanLevel = Math.max(1, Math.min(5, level));
   const set = isHindi ? bank[cleanLevel].hi : bank[cleanLevel].en;
+  
+  // Filter out questions already asked in this session
+  const available = set.filter(q => !askedPrompts.includes(q.prompt));
+  if (available.length > 0) {
+    const idx = Math.floor(Math.random() * available.length);
+    return available[idx];
+  }
+  
   const idx = Math.floor(Math.random() * set.length);
   return set[idx];
 }
@@ -376,9 +424,19 @@ export async function startSpeechEvalSession(childId: number) {
   const isHindi = child.mother_tongue?.toLowerCase().includes('hindi') || child.mother_tongue === 'hi';
   let nextQ = await generateSpeechQuestionAI(newSession.id, 3, child, 1, supabaseAdmin);
   
-  const questionType = nextQ?.type || (isHindi ? 'naming' : 'naming');
-  const questionPrompt = nextQ?.prompt || (isHindi ? 'घर में मम्मी खाना कहाँ बनाती हैं? बताओ।' : 'Where does mummy cook food in the house? Tell me.');
-  const questionExpected = nextQ?.expected || (isHindi ? 'रसोई|किचन|kitchen|rasoi' : 'kitchen|rasoi');
+  if (!nextQ) {
+    const canned = getCannedQuestion(3, isHindi, []);
+    nextQ = {
+      type: canned.type,
+      prompt: canned.prompt,
+      expected: canned.expected,
+      level: 3,
+    };
+  }
+
+  const questionType = nextQ.type;
+  const questionPrompt = nextQ.prompt;
+  const questionExpected = nextQ.expected;
 
   const { data: newQ, error: qErr } = await supabaseAdmin
     .from('eval_questions')
@@ -659,7 +717,12 @@ export async function submitSpeechAnswer(
 
   if (!nextQ) {
     const isHindi = session.children.mother_tongue?.toLowerCase().includes('hindi') || session.children.mother_tongue === 'hi';
-    nextQ = getCannedQuestion(nextLevel, isHindi);
+    const { data: asked } = await supabaseAdmin
+      .from('eval_questions')
+      .select('prompt')
+      .eq('session_id', sessionId);
+    const askedPrompts = (asked || []).map((q: any) => q.prompt);
+    nextQ = getCannedQuestion(nextLevel, isHindi, askedPrompts);
   }
 
   const newSeq = seqSoFar + 1;

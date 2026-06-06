@@ -3,7 +3,8 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import ChildDetailClient from './ChildDetailClient';
-import { isSpeechEvalUnlocked } from '@/app/actions/speech';
+import { isSpeechEvalUnlocked, getLatestSpeechSession } from '@/app/actions/speech';
+import { isReflectUnlocked, getLatestReflectSessionForChild } from '@/app/actions/reflect';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,6 +88,13 @@ export default async function ChildDetailPage({ params }: PageProps) {
   }
 
   const speechUnlocked = await isSpeechEvalUnlocked(childId);
+  const reflectUnlocked = await isReflectUnlocked(childId);
+
+  const speechSessionRes = await getLatestSpeechSession(childId);
+  const speechSession = 'error' in speechSessionRes ? null : speechSessionRes;
+
+  const reflectSessionRes = await getLatestReflectSessionForChild(childId);
+  const reflectSession = 'error' in reflectSessionRes ? null : reflectSessionRes;
 
   return (
     <ChildDetailClient
@@ -97,6 +105,9 @@ export default async function ChildDetailPage({ params }: PageProps) {
       parentCredits={parent?.credits || 0}
       inProgressModules={inProgressModules}
       speechUnlocked={speechUnlocked}
+      reflectUnlocked={reflectUnlocked}
+      speechSession={speechSession}
+      reflectSession={reflectSession}
     />
   );
 }

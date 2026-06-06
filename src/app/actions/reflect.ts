@@ -176,7 +176,7 @@ async function markAreaCovered(sessionId: number, areaKey: string, supabaseAdmin
     .eq('id', sessionId);
 }
 
-export async function startReflectSession(childId?: number) {
+export async function startReflectSession(childId: number) {
   const supabase = await createClient();
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) {
@@ -185,26 +185,31 @@ export async function startReflectSession(childId?: number) {
 
   const supabaseAdmin = createAdminClient();
 
-  // Validate child if provided
-  if (childId && childId > 0) {
-    const { data: child, error: childErr } = await supabaseAdmin
-      .from('children')
-      .select('*')
-      .eq('id', childId)
-      .eq('parent_id', user.id)
-      .single();
+  // Validate child and check ownership
+  const { data: child, error: childErr } = await supabaseAdmin
+    .from('children')
+    .select('*')
+    .eq('id', childId)
+    .eq('parent_id', user.id)
+    .single();
 
-    if (childErr || !child) {
-      return { error: 'Please select a valid child context.' };
-    }
+  if (childErr || !child) {
+    return { error: 'Please select a valid child context.' };
   }
 
-  // Resume check: latest in_progress session within 24h
+  // Check if unlocked
+  const unlocked = await isReflectUnlocked(childId);
+  if (!unlocked) {
+    return { error: 'Please unlock this module first.' };
+  }
+
+  // Resume check: latest in_progress session within 24h for THIS child
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data: existing } = await supabaseAdmin
     .from('parent_reflect_sessions')
     .select('*')
     .eq('parent_id', user.id)
+    .eq('child_id', childId)
     .eq('status', 'in_progress')
     .gt('last_activity_at', oneDayAgo)
     .order('id', { ascending: false })
@@ -247,30 +252,14 @@ export async function startReflectSession(childId?: number) {
       .eq('id', existing.id);
   }
 
-  // Check balance: MUST be >= 1000 (do not deduct immediately)
-  const { data: parent } = await supabaseAdmin
-    .from('parents')
-    .select('credits, name')
-    .eq('id', user.id)
-    .single();
-
-  const balance = parent?.credits || 0;
-  if (balance < REFLECT_PRICE) {
-    return {
-      error: 'insufficient',
-      need: REFLECT_PRICE,
-      balance,
-    };
-  }
-
-  // Start fresh
+  // Start fresh - since it's already unlocked/paid, cost_paid can be set to REFLECT_PRICE
   const { data: newSession, error: sErr } = await supabaseAdmin
     .from('parent_reflect_sessions')
     .insert({
       parent_id: user.id,
-      child_id: childId || null,
+      child_id: childId,
       status: 'in_progress',
-      cost_paid: 0, // charged on complete
+      cost_paid: REFLECT_PRICE,
       current_phase: 1,
       turn_count: 1,
     })
@@ -801,17 +790,24 @@ async function finalizeReflectSession(sessionId: number, supabaseAdmin: any) {
       .eq('id', sessionId);
   }
 
-  // Charge wallet if not already charged
-  const { data: ledgerEntry } = await supabaseAdmin
+  // Check if unlocked upfront or previously charged
+  const { data: unlockLedger } = await supabaseAdmin
+    .from('wallet_ledger')
+    .select('id')
+    .eq('parent_id', session.parent_id)
+    .eq('service_key', 'reflect_eval_unlock')
+    .eq('ref_id', session.child_id)
+    .maybeSingle();
+
+  const { data: legacyLedger } = await supabaseAdmin
     .from('wallet_ledger')
     .select('id')
     .eq('parent_id', session.parent_id)
     .eq('service_key', 'mod_parent_reflect')
     .eq('ref_id', sessionId)
-    .eq('amount', -REFLECT_PRICE)
     .maybeSingle();
 
-  if (!ledgerEntry) {
+  if (!unlockLedger && !legacyLedger) {
     const { data: parent } = await supabaseAdmin
       .from('parents')
       .select('credits')
@@ -827,17 +823,23 @@ async function finalizeReflectSession(sessionId: number, supabaseAdmin: any) {
       .update({ credits: nextCredits })
       .eq('id', session.parent_id);
 
-    // Log ledger
+    // Log ledger for upfront unlock key (as fallback)
     await supabaseAdmin.from('wallet_ledger').insert({
       parent_id: session.parent_id,
       amount: -REFLECT_PRICE,
       balance_after: nextCredits,
-      service_key: 'mod_parent_reflect',
-      ref_id: sessionId,
+      service_key: 'reflect_eval_unlock',
+      ref_id: session.child_id,
       reason: 'Parent Reflection — report generated',
       created_by: 'system',
     });
 
+    await supabaseAdmin
+      .from('parent_reflect_sessions')
+      .update({ cost_paid: REFLECT_PRICE })
+      .eq('id', sessionId);
+  } else {
+    // Already paid/unlocked
     await supabaseAdmin
       .from('parent_reflect_sessions')
       .update({ cost_paid: REFLECT_PRICE })
@@ -1366,6 +1368,122 @@ export async function getLatestReflectReport() {
   const { data: session } = await supabaseAdmin
     .from('parent_reflect_sessions')
     .select('*')
+    .eq('parent_id', user.id)
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!session) return { error: 'No report' as string };
+
+  let listing = null;
+  if (session.v3_listing_json) {
+    try {
+      listing = typeof session.v3_listing_json === 'string'
+        ? JSON.parse(session.v3_listing_json)
+        : session.v3_listing_json;
+    } catch {}
+  }
+
+  return {
+    parent_summary_md: session.parent_summary_md as string,
+    v3_listing: listing,
+    risk_level: session.admin_risk_level,
+    safety_red_flag: session.sig_safety_red_flag,
+    completed_at: session.completed_at as string,
+  };
+}
+
+// Check if reflect eval is permanently unlocked for this child
+export async function isReflectUnlocked(childId: number): Promise<boolean> {
+  const supabase = await createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return false;
+  const db = createAdminClient();
+  const { count } = await db
+    .from('wallet_ledger')
+    .select('*', { count: 'exact', head: true })
+    .eq('parent_id', user.id)
+    .eq('service_key', 'reflect_eval_unlock')
+    .eq('ref_id', childId);
+  return (count || 0) > 0;
+}
+
+// Permanently unlock parent reflect eval for a child — deducts 1000 credits once.
+export async function unlockReflectAction(
+  childId: number
+): Promise<{ ok: boolean; error?: string; insufficient?: boolean; need?: number; balance?: number }> {
+  const supabase = await createClient();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) return { ok: false, error: 'Please log in again.' };
+
+  const db = createAdminClient();
+
+  const { data: child } = await db
+    .from('children')
+    .select('id, name')
+    .eq('id', childId)
+    .eq('parent_id', user.id)
+    .maybeSingle();
+  if (!child) return { ok: false, error: 'Child not found.' };
+
+  // Already unlocked?
+  if (await isReflectUnlocked(childId)) return { ok: true };
+
+  const { data: parent } = await db.from('parents').select('credits').eq('id', user.id).single();
+  const balance = parent?.credits || 0;
+  const PRICE = 1000;
+  if (balance < PRICE) return { ok: false, insufficient: true, need: PRICE, balance, error: 'Insufficient credits.' };
+
+  const newBalance = balance - PRICE;
+  await db.from('parents').update({ credits: newBalance }).eq('id', user.id);
+
+  await db.from('wallet_ledger').insert({
+    parent_id: user.id,
+    amount: -PRICE,
+    balance_after: newBalance,
+    service_key: 'reflect_eval_unlock',
+    ref_id: childId,
+    reason: `Parent Reflection unlocked for ${child.name}`,
+  });
+
+  const { revalidatePath } = await import('next/cache');
+  revalidatePath(`/child/${childId}`);
+  revalidatePath('/dashboard');
+  return { ok: true, balance: newBalance };
+}
+
+// Returns the latest reflection session for this child regardless of status
+export async function getLatestReflectSessionForChild(childId: number) {
+  const supabase = await createClient();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) return { error: 'Not signed in' as string };
+
+  const supabaseAdmin = createAdminClient();
+  const { data: session } = await supabaseAdmin
+    .from('parent_reflect_sessions')
+    .select('id, child_id, status, turn_count, completed_at, started_at, parent_summary_md')
+    .eq('child_id', childId)
+    .eq('parent_id', user.id)
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!session) return { error: 'No session' as string };
+  return session;
+}
+
+// Latest COMPLETED reflection for this child
+export async function getLatestReflectReportForChild(childId: number) {
+  const supabase = await createClient();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) return { error: 'Not signed in' as string };
+
+  const supabaseAdmin = createAdminClient();
+  const { data: session } = await supabaseAdmin
+    .from('parent_reflect_sessions')
+    .select('*')
+    .eq('child_id', childId)
     .eq('parent_id', user.id)
     .eq('status', 'completed')
     .order('completed_at', { ascending: false })
