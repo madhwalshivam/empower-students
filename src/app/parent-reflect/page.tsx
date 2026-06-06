@@ -27,7 +27,8 @@ import {
   submitReflectAnswer,
   finishReflectEarly,
   discardReflectSession,
-  getReflectSessionReport
+  getReflectSessionReport,
+  getLatestReflectReport,
 } from '@/app/actions/reflect';
 
 // Simple markdown-to-HTML parser for safety and styling
@@ -94,13 +95,24 @@ export default function ParentReflectPage() {
   const timerRef = useRef<any>(null);
   const silenceTimerRef = useRef<any>(null);
 
-  // Auto-redirect checks or loaded triggers
+  // On mount: show completed report or resume in_progress session — so a
+  // returning parent never sees the pay-gate for something they already paid for.
   useEffect(() => {
-    // Check if SpeechRecognition is available, otherwise alert
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setError('Web speech synthesis or mic inputs are not fully supported on this browser. You can still type your answers.');
-    }
+    (async () => {
+      const existing = await getLatestReflectReport();
+      if (!('error' in existing) && existing.parent_summary_md) {
+        setReport(existing);
+        setScreen('report');
+        return;
+      }
+      // No completed report — land on the landing screen (existing in_progress
+      // sessions are auto-resumed by startReflectSession when they click Begin).
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        setError('Web speech synthesis or mic inputs are not fully supported on this browser. You can still type your answers.');
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Timer increment
@@ -117,6 +129,16 @@ export default function ParentReflectPage() {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [screen]);
+
+  // Stop mic + clear timers on unmount to prevent stale callbacks after navigation.
+  useEffect(() => {
+    return () => {
+      try { recognitionRef.current?.stop(); } catch {}
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+      window.speechSynthesis?.cancel();
+    };
+  }, []);
 
   // TTS speech output
   const speakQuestion = (text: string) => {
@@ -177,6 +199,11 @@ export default function ParentReflectPage() {
 
       rec.onerror = (e: any) => {
         console.error('Mic error:', e);
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'network') {
+          setIsListening(false);
+          setShowManualInput(true);
+          setStatusMessage('Mic not available — please type your answer below.');
+        }
       };
 
       rec.onend = () => {
@@ -187,6 +214,8 @@ export default function ParentReflectPage() {
       rec.start();
     } catch (err) {
       console.error('Error starting recognition:', err);
+      setShowManualInput(true);
+      setStatusMessage('Mic not available — please type your answer below.');
     }
   };
 
@@ -641,16 +670,24 @@ export default function ParentReflectPage() {
       {/* 5. Report view */}
       {screen === 'report' && report && (
         <div className="space-y-6 animate-fade-in">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <h1 className="heading-fun text-2xl font-bold text-slate-900 dark:text-white">
               Parent Reflection Summary
             </h1>
-            <Link
-              href="/dashboard"
-              className="bg-indigo-50 dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 text-indigo-700 dark:text-indigo-400 font-bold text-xs px-4 py-2 rounded-xl"
-            >
-              Dashboard
-            </Link>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={() => { setReport(null); setSession(null); setScreen('landing'); setConsents({ c1: false, c2: false, c3: false, c4: false }); }}
+                style={{ background: '#f1f5f9', color: '#4f46e5', fontWeight: 700, fontSize: 12, padding: '8px 14px', borderRadius: 12, border: 'none', cursor: 'pointer' }}
+              >
+                New Reflection
+              </button>
+              <Link
+                href="/dashboard"
+                className="bg-indigo-50 dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 text-indigo-700 dark:text-indigo-400 font-bold text-xs px-4 py-2 rounded-xl"
+              >
+                Dashboard
+              </Link>
+            </div>
           </div>
 
           {/* Callback Scheduled confirmation */}

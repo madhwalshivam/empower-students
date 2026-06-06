@@ -98,7 +98,7 @@ export default function Header() {
           </Link>
 
           {/* Language Toggle */}
-          <div className="lang-toggle inline-flex items-center rounded-full p-0.5 text-xs font-bold border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800">
+          <div data-no-translate className="lang-toggle inline-flex items-center rounded-full p-0.5 text-xs font-bold border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800">
             <button
               onClick={() => setLanguage('en')}
               className={`px-3 py-1 rounded-full transition-all ${language === 'en' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 bg-transparent border-none'}`}
@@ -184,7 +184,7 @@ export default function Header() {
           {/* Mobile Language Switcher */}
           <div className="flex items-center justify-between py-1 border-b border-slate-50 dark:border-slate-800">
             <span className="text-slate-500 font-semibold text-sm">Language</span>
-            <div className="lang-toggle inline-flex items-center rounded-full p-0.5 text-xs font-bold border border-slate-200 bg-slate-100">
+            <div data-no-translate className="lang-toggle inline-flex items-center rounded-full p-0.5 text-xs font-bold border border-slate-200 bg-slate-100">
               <button
                 onClick={() => setLanguage('en')}
                 className={`px-3 py-1 rounded-full transition-all ${language === 'en' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 bg-transparent border-none'}`}

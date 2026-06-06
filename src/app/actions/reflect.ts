@@ -1334,3 +1334,60 @@ DO NOT include:
 
 Output ONLY the markdown report. No preamble, no JSON, no fences.`;
 }
+
+// Returns the latest reflection session for this parent regardless of status —
+// used by the dashboard and the page to decide what to show.
+export async function getLatestReflectSession() {
+  const supabase = await createClient();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) return { error: 'Not signed in' as string };
+
+  const supabaseAdmin = createAdminClient();
+  const { data: session } = await supabaseAdmin
+    .from('parent_reflect_sessions')
+    .select('id, status, turn_count, completed_at, started_at, parent_summary_md')
+    .eq('parent_id', user.id)
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!session) return { error: 'No session' as string };
+  return session;
+}
+
+// Latest COMPLETED reflection for this parent — returns the full report data so
+// a returning parent goes straight to their purchased report, not the pay-gate.
+export async function getLatestReflectReport() {
+  const supabase = await createClient();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) return { error: 'Not signed in' as string };
+
+  const supabaseAdmin = createAdminClient();
+  const { data: session } = await supabaseAdmin
+    .from('parent_reflect_sessions')
+    .select('*')
+    .eq('parent_id', user.id)
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!session) return { error: 'No report' as string };
+
+  let listing = null;
+  if (session.v3_listing_json) {
+    try {
+      listing = typeof session.v3_listing_json === 'string'
+        ? JSON.parse(session.v3_listing_json)
+        : session.v3_listing_json;
+    } catch {}
+  }
+
+  return {
+    parent_summary_md: session.parent_summary_md as string,
+    v3_listing: listing,
+    risk_level: session.admin_risk_level,
+    safety_red_flag: session.sig_safety_red_flag,
+    completed_at: session.completed_at as string,
+  };
+}

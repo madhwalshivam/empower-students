@@ -6,20 +6,16 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Only run the session-refresh middleware on routes that actually need an
-  // authenticated user. Public pages (home, about, catalogue, login, etc.) no
-  // longer pay for a network round-trip to Supabase Auth on every navigation,
-  // which is what made browsing feel laggy. Protected pages still validate the
-  // user themselves server-side, so auth correctness is unchanged.
+  // Run on every page (including public ones like the home page) so a stale
+  // Supabase refresh token gets cleared no matter where the visitor lands —
+  // otherwise the browser client reads the dead cookie and logs the
+  // "Invalid Refresh Token: Refresh Token Not Found" error in the dev overlay.
+  //
+  // This does NOT reintroduce the public-page lag the narrow matcher fixed:
+  // `updateSession` returns immediately (no Supabase round-trip) unless an
+  // `sb-…-auth-token` cookie is actually present, so logged-out visitors pay
+  // nothing. Static assets and Next internals are excluded below.
   matcher: [
-    '/dashboard/:path*',
-    '/wallet/:path*',
-    '/child/:path*',
-    '/eval/:path*',
-    '/eval-speech/:path*',
-    '/parent-reflect/:path*',
-    '/partner/:path*',
-    '/admin/:path*',
-    '/report/:path*',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js)$).*)',
   ],
 };

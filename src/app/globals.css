@@ -434,6 +434,38 @@ a {
 .text-emerald-800 { color: #065f46; }
 .text-emerald-600 { color: #059669; }
 
+.text-black { color: #0f172a; }
+
+/* Amber alert colors (used by reflection / wallet notices) */
+.bg-amber-50 { background-color: #fffbeb; }
+.border-amber-200 { border-color: #fde68a; }
+.text-amber-900 { color: #78350f; }
+
+/* ------------------------------------------------------------------
+   Gradient backgrounds. The project has no Tailwind, so these mirror
+   Tailwind's `from-*` / `to-*` mechanism: a color-stop class sets a CSS
+   variable on the element and the direction class reads it. Without this,
+   `bg-gradient-to-* from-* to-*` produced NO background, leaving white
+   text invisible on a transparent card (e.g. the Parent Reflection hero).
+   ------------------------------------------------------------------ */
+.bg-gradient-to-r  { background-image: linear-gradient(to right,        var(--grad-from, transparent), var(--grad-to, transparent)); }
+.bg-gradient-to-l  { background-image: linear-gradient(to left,         var(--grad-from, transparent), var(--grad-to, transparent)); }
+.bg-gradient-to-t  { background-image: linear-gradient(to top,          var(--grad-from, transparent), var(--grad-to, transparent)); }
+.bg-gradient-to-b  { background-image: linear-gradient(to bottom,       var(--grad-from, transparent), var(--grad-to, transparent)); }
+.bg-gradient-to-br { background-image: linear-gradient(to bottom right, var(--grad-from, transparent), var(--grad-to, transparent)); }
+.bg-gradient-to-bl { background-image: linear-gradient(to bottom left,  var(--grad-from, transparent), var(--grad-to, transparent)); }
+.bg-gradient-to-tr { background-image: linear-gradient(to top right,    var(--grad-from, transparent), var(--grad-to, transparent)); }
+.bg-gradient-to-tl { background-image: linear-gradient(to top left,     var(--grad-from, transparent), var(--grad-to, transparent)); }
+
+.from-indigo-500  { --grad-from: #6366f1; }
+.from-indigo-600  { --grad-from: #4f46e5; }
+.from-purple-600  { --grad-from: #9333ea; }
+.from-emerald-500 { --grad-from: #10b981; }
+.to-purple-650    { --grad-to: #7c3aed; }
+.to-purple-700    { --grad-to: #6d28d9; }
+.to-indigo-700    { --grad-to: #4338ca; }
+.to-teal-650      { --grad-to: #0d9488; }
+
 /* Hover transitions and states */
 .transition-all { transition: all 0.2s ease-in-out; }
 .transition-colors { transition: background-color 0.2s, color 0.2s; }

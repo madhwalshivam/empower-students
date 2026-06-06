@@ -15,8 +15,12 @@ import {
   Mic,
   ChevronRight,
   HeartHandshake,
-  ArrowRight
+  ArrowRight,
+  RefreshCw,
+  Clock,
 } from 'lucide-react';
+import { getLatestSpeechSession } from '@/app/actions/speech';
+import { getLatestReflectSession } from '@/app/actions/reflect';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,7 +70,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     { data: parent },
     { data: children },
     { data: unreadFeedback },
-    { data: premiumReflect },
   ] = await Promise.all([
     supabaseAdmin.from('parents').select('*').eq('id', user.id).single(),
     supabaseAdmin
@@ -80,14 +83,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       .eq('parent_id', user.id)
       .eq('seen_by_parent', 0)
       .order('id', { ascending: false }),
-    supabaseAdmin
-      .from('parent_reflect_sessions')
-      .select('*')
-      .eq('parent_id', user.id)
-      .eq('status', 'completed')
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
   ]);
 
   if (!parent) {
@@ -103,7 +98,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const childrenList = children || [];
   const feedbackList = unreadFeedback || [];
-  const reflectCompleted: any = premiumReflect;
 
   // Determine selected child
   const selectedCid = resolvedSearchParams.cid ? Number(resolvedSearchParams.cid) : (childrenList[0]?.id || 0);
@@ -111,7 +105,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   // Second parallel batch — these depend on the children/selected child resolved
   // above, but don't depend on each other, so run them together too.
-  const [{ data: allCompleted }, { data: premiumSpeech }] = await Promise.all([
+  // Use the any-status session helpers so "My Purchases" shows as soon as a
+  // session is started (credits deducted), not just after completion.
+  const [{ data: allCompleted }, rawSpeechSession, rawReflectSession] = await Promise.all([
     childrenList.length > 0
       ? supabaseAdmin
           .from('assessments')
@@ -119,17 +115,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           .in('child_id', childrenList.map((c) => c.id))
           .eq('status', 'completed')
       : Promise.resolve({ data: [] as any[] }),
+    // Speech eval is per-child — query for the currently selected child only.
+    // Each child gets their own independent Speech & Language evaluation.
     selectedChild
-      ? supabaseAdmin
-          .from('eval_sessions')
-          .select('*')
-          .eq('child_id', selectedChild.id)
-          .eq('module', 'mod_speech_basic')
-          .eq('status', 'completed')
-          .order('completed_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
+      ? getLatestSpeechSession(Number(selectedChild.id))
+      : Promise.resolve({ error: 'no child' }),
+    getLatestReflectSession(),
   ]);
 
   // Completed-module counts per child (distinct modules) — drives the list + progress
@@ -140,7 +131,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     if (a.module) completedByChild[cid].add(a.module);
   });
 
-  const speechCompleted: any = premiumSpeech;
+  const speechSession: any = rawSpeechSession && !('error' in rawSpeechSession) ? rawSpeechSession : null;
+  const reflectSession: any = rawReflectSession && !('error' in rawReflectSession) ? rawReflectSession : null;
+  const speechCompleted: any = speechSession?.status === 'completed' ? speechSession : null;
+  const reflectCompleted: any = reflectSession?.status === 'completed' ? reflectSession : null;
 
   const selectedDoneCount = selectedChild ? (completedByChild[Number(selectedChild.id)]?.size || 0) : 0;
   const selectedPct = Math.round((selectedDoneCount / TOTAL_MODULES) * 100);
@@ -303,13 +297,101 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   </div>
                 </div>
 
-                {/* Premium Clinical Assessments */}
+                {/* ── My Purchases — shown as soon as any session exists (paid) ── */}
+                {(speechSession || reflectSession) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <h4 style={{ fontSize: 17, fontWeight: 800, color: '#1e293b', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Check color="#059669" size={19} /> My Purchases
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+                      {/* Speech card — abandoned = purchased (free retry) */}
+                      {speechSession && (() => {
+                        const st = speechSession.status;
+                        const isComplete = st === 'completed';
+                        const isInProgress = st === 'in_progress';
+                        // Abandoned = paid but interrupted — treat as "Purchased" (green),
+                        // because startSpeechEvalSession will now restart it for free.
+                        const isPurchased = isComplete || st === 'abandoned';
+                        const bg = isPurchased ? 'linear-gradient(135deg,#f0fdf4,#ecfdf5)' : 'linear-gradient(135deg,#eff6ff,#eef2ff)';
+                        const border = isPurchased ? '1.5px solid #a7f3d0' : '1.5px solid #c7d2fe';
+                        const badgeLabel = isComplete ? 'Purchased' : isInProgress ? 'In Progress' : 'Purchased';
+                        const badgeBg = isPurchased ? '#059669' : '#4f46e5';
+                        return (
+                          <div style={{ background: bg, border, borderRadius: 20, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Mic color={isPurchased ? '#059669' : '#4f46e5'} size={20} />
+                                <span style={{ fontWeight: 800, color: '#1e293b', fontSize: 14 }}>Speech &amp; Language</span>
+                              </div>
+                              <span style={{ background: badgeBg, color: '#fff', fontWeight: 800, fontSize: 10, padding: '3px 9px', borderRadius: 99 }}>{badgeLabel}</span>
+                            </div>
+                            <div style={{ background: '#fff', borderRadius: 12, padding: '10px 14px' }}>
+                              {isComplete ? (
+                                <div style={{ fontSize: 14, fontWeight: 800, color: '#065f46' }}>Level L{speechSession.final_level} · {speechSession.final_pct}%</div>
+                              ) : isInProgress ? (
+                                <div style={{ fontSize: 13, color: '#4338ca' }}><Clock size={13} style={{ display:'inline',marginRight:4 }} />{speechSession.questions_asked || 0} questions answered — tap to continue</div>
+                              ) : (
+                                <div style={{ fontSize: 13, color: '#065f46' }}>Tap to start your evaluation — no extra charge</div>
+                              )}
+                            </div>
+                            <Link
+                              href={`/eval-speech/${selectedChild?.id}`}
+                              style={{ display: 'block', textAlign: 'center', background: isPurchased ? '#059669' : '#4f46e5', color: '#fff', fontSize: 13, fontWeight: 700, padding: '11px', borderRadius: 12, textDecoration: 'none' }}
+                            >
+                              {isComplete ? 'Open Full Report →' : isInProgress ? 'Resume Eval →' : 'Start Eval (Free) →'}
+                            </Link>
+                          </div>
+                        );
+                      })()}
+                      {/* Reflection card */}
+                      {reflectSession && (() => {
+                        const st = reflectSession.status;
+                        const isComplete = st === 'completed';
+                        const isInProgress = st === 'in_progress';
+                        const isPurchased = isComplete || st === 'abandoned';
+                        const bg = isPurchased ? 'linear-gradient(135deg,#f0fdf4,#ecfdf5)' : 'linear-gradient(135deg,#eff6ff,#eef2ff)';
+                        const border = isPurchased ? '1.5px solid #a7f3d0' : '1.5px solid #c7d2fe';
+                        const badge = isComplete ? { bg: '#059669', label: 'Purchased' } : isInProgress ? { bg: '#4f46e5', label: 'In Progress' } : { bg: '#059669', label: 'Purchased' };
+                        return (
+                          <div style={{ background: bg, border, borderRadius: 20, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <HeartHandshake color={isComplete ? '#059669' : '#4f46e5'} size={20} />
+                                <span style={{ fontWeight: 800, color: '#1e293b', fontSize: 14 }}>Parent Reflection</span>
+                              </div>
+                              <span style={{ background: badge.bg, color: '#fff', fontWeight: 800, fontSize: 10, padding: '3px 9px', borderRadius: 99 }}>{badge.label}</span>
+                            </div>
+                            <div style={{ background: '#fff', borderRadius: 12, padding: '10px 14px' }}>
+                              {isComplete ? (
+                                <div style={{ fontSize: 14, fontWeight: 800, color: '#065f46' }}>Psychologist Callback Scheduled</div>
+                              ) : isInProgress ? (
+                                <div style={{ fontSize: 13, color: '#4338ca' }}><Clock size={13} style={{ display:'inline',marginRight:4 }} />Session in progress · {reflectSession.turn_count || 0} turns</div>
+                              ) : (
+                                <div style={{ fontSize: 13, color: '#64748b' }}>Session ended before completion</div>
+                              )}
+                            </div>
+                            <Link
+                              href="/parent-reflect"
+                              style={{ display: 'block', textAlign: 'center', background: isPurchased ? '#059669' : '#4f46e5', color: '#fff', fontSize: 13, fontWeight: 700, padding: '11px', borderRadius: 12, textDecoration: 'none' }}
+                            >
+                              {isComplete ? 'Open Full Report →' : isInProgress ? 'Resume Session →' : 'Start Session (Free) →'}
+                            </Link>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {/* Premium Clinical Assessments — only show services not yet started */}
+                {(!speechSession || !reflectSession) && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <h4 style={{ fontSize: 17, fontWeight: 800, color: '#1e293b', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Sparkles color="#4f46e5" size={19} /> Premium Clinical Assessments
                   </h4>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-                    {/* Speech Evaluation Card */}
+                    {/* Speech Evaluation Card — only if not yet started */}
+                    {!speechSession && (
                     <div style={{ background: '#fff', border: '1px solid #e7e9f0', borderRadius: 20, padding: 20, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 14, boxShadow: '0 2px 14px rgba(15,23,42,0.04)' }}>
                       <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
@@ -323,21 +405,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                           Voice-led adaptive conversation (~5 mins) evaluating articulation, fluency, and processing with real-time AI analysis.
                         </p>
                       </div>
-                      {speechCompleted ? (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
-                          <span style={{ color: '#059669', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <Check size={14} /> Level L{speechCompleted.final_level} ({speechCompleted.final_pct}%)
-                          </span>
-                          <Link href={`/eval-speech/${selectedChild.id}`} style={{ color: '#4f46e5', fontWeight: 700, textDecoration: 'none' }}>Report</Link>
-                        </div>
-                      ) : (
-                        <Link href={`/eval-speech/${selectedChild.id}`} style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', color: '#fff', fontSize: 13, fontWeight: 700, padding: '11px', borderRadius: 12, textDecoration: 'none' }}>
-                          Start Speech Eval (₹1,000)
-                        </Link>
-                      )}
+                      <Link href={`/eval-speech/${selectedChild.id}`} style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', color: '#fff', fontSize: 13, fontWeight: 700, padding: '11px', borderRadius: 12, textDecoration: 'none' }}>
+                        Start Speech Eval (₹1,000)
+                      </Link>
                     </div>
+                    )}
 
-                    {/* Parent Reflection Card */}
+                    {/* Parent Reflection Card — only if not yet started */}
+                    {!reflectSession && (
                     <div style={{ background: '#fff', border: '1px solid #e7e9f0', borderRadius: 20, padding: 20, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 14, boxShadow: '0 2px 14px rgba(15,23,42,0.04)' }}>
                       <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
@@ -351,21 +426,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                           15-min guided parenting burden check-in. Includes written clinical reflection and a psychologist callback.
                         </p>
                       </div>
-                      {reflectCompleted ? (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
-                          <span style={{ color: '#059669', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <Check size={14} /> Callback Scheduled
-                          </span>
-                          <Link href="/parent-reflect" style={{ color: '#4f46e5', fontWeight: 700, textDecoration: 'none' }}>View Report</Link>
-                        </div>
-                      ) : (
-                        <Link href="/parent-reflect" style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', color: '#fff', fontSize: 13, fontWeight: 700, padding: '11px', borderRadius: 12, textDecoration: 'none' }}>
-                          Start Reflection (₹1,000)
-                        </Link>
-                      )}
+                      <Link href="/parent-reflect" style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', color: '#fff', fontSize: 13, fontWeight: 700, padding: '11px', borderRadius: 12, textDecoration: 'none' }}>
+                        Start Reflection (₹1,000)
+                      </Link>
                     </div>
+                    )}
                   </div>
                 </div>
+                )}
               </>
             )}
           </div>

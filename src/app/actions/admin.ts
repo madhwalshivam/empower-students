@@ -219,6 +219,72 @@ export async function markPartnerPaidAction(partnerId: string) {
   }
 }
 
+// Admin manually adjusts a parent's wallet credits. `amount` is a signed
+// delta — positive grants credits, negative deducts them. The change is
+// recorded in wallet_ledger (with the admin as `created_by`) so it shows up in
+// the parent's transaction history just like a top-up or spend.
+export async function adjustParentCreditsAction(
+  parentId: string,
+  amount: number,
+  reason?: string
+) {
+  try {
+    const admin = await requireAdmin();
+    if (!admin) return { ok: false, error: 'Unauthorized.' };
+
+    const delta = Math.trunc(Number(amount));
+    if (!Number.isFinite(delta) || delta === 0) {
+      return { ok: false, error: 'Enter a non-zero credit amount.' };
+    }
+
+    const db = createAdminClient();
+
+    const { data: parent, error: readErr } = await db
+      .from('parents')
+      .select('credits')
+      .eq('id', parentId)
+      .maybeSingle();
+
+    if (readErr || !parent) {
+      return { ok: false, error: 'Parent not found.' };
+    }
+
+    const current = parent.credits || 0;
+    const newBalance = current + delta;
+    if (newBalance < 0) {
+      return { ok: false, error: `Cannot deduct ${Math.abs(delta)} — parent only has ${current} credits.` };
+    }
+
+    const { error: updErr } = await db
+      .from('parents')
+      .update({ credits: newBalance })
+      .eq('id', parentId);
+
+    if (updErr) {
+      console.error('Adjust credits update error:', updErr);
+      return { ok: false, error: updErr.message };
+    }
+
+    // Best-effort ledger entry — the balance update above is the source of truth.
+    await db.from('wallet_ledger').insert({
+      parent_id: parentId,
+      amount: delta,
+      balance_after: newBalance,
+      service_key: 'admin_adjustment',
+      reason: reason?.trim() || (delta > 0 ? 'Credits added by admin' : 'Credits removed by admin'),
+      created_by: admin.email || 'admin',
+    });
+
+    revalidatePath(`/admin/parents/${parentId}`);
+    revalidatePath('/admin/parents');
+    revalidatePath('/admin/dashboard');
+
+    return { ok: true, credits: newBalance };
+  } catch (err: any) {
+    return { ok: false, error: err.message || 'Failed to adjust credits.' };
+  }
+}
+
 export async function updatePartnerStatusAction(
   partnerId: string,
   status: 'active' | 'pending' | 'paused' | 'terminated'

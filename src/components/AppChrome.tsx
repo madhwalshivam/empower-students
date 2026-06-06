@@ -20,6 +20,9 @@ const PROTECTED_PREFIXES = [
   '/eval',
   '/eval-speech',
   '/parent-reflect',
+  '/growth-plan',
+  '/course',
+  '/tracker',
 ];
 
 // Dual routes: public AND in-app. Logged-in users get the shell; visitors get

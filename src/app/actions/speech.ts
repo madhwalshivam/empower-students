@@ -239,8 +239,10 @@ export async function startSpeechEvalSession(childId: number) {
     return { error: 'Please select a valid child.' };
   }
 
-  // Resume check: latest in_progress session within 30 min with questions_asked > 0
-  const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  // Resume check: any in_progress session within 7 days. 30-min was too short —
+  // parents often navigate away mid-eval (child distracted, phone call, etc.) and
+  // lose their paid session. 7 days keeps paid sessions alive long enough to finish.
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const { data: existing } = await supabaseAdmin
     .from('eval_sessions')
     .select('*')
@@ -248,7 +250,7 @@ export async function startSpeechEvalSession(childId: number) {
     .eq('child_id', childId)
     .eq('module', 'mod_speech_basic')
     .eq('status', 'in_progress')
-    .gt('started_at', thirtyMinAgo)
+    .gt('started_at', sevenDaysAgo)
     .order('id', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -292,7 +294,20 @@ export async function startSpeechEvalSession(childId: number) {
     .eq('id', user.id)
     .single();
 
-  const isFree = !parent?.free_eval_used_at;
+  // "Once purchased, always purchased" — if any previous paid session exists for
+  // this child (completed OR abandoned), the parent already paid. New attempts are
+  // free so they can finish without being charged twice.
+  const { count: prevPaidCount } = await supabaseAdmin
+    .from('eval_sessions')
+    .select('id', { count: 'exact', head: true })
+    .eq('parent_id', user.id)
+    .eq('child_id', childId)
+    .eq('module', 'mod_speech_basic')
+    .gt('cost_paid', 0);
+
+  const alreadyPaid = (prevPaidCount || 0) > 0;
+
+  const isFree = !parent?.free_eval_used_at || alreadyPaid;
   let costPaid = 0;
 
   if (!isFree) {
@@ -820,6 +835,153 @@ export async function getSpeechSessionReport(sessionId: number) {
   };
 }
 
+// Returns the latest speech session for this parent+child regardless of status.
+// Used by the dashboard and the eval-speech page to decide what to show:
+//   completed  → show report
+//   in_progress → show resume
+//   abandoned   → show "start again" (credits already used)
+export async function getLatestSpeechSession(childId: number) {
+  const supabase = await createClient();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) return { error: 'Not signed in' };
+
+  const supabaseAdmin = createAdminClient();
+  const { data: session } = await supabaseAdmin
+    .from('eval_sessions')
+    .select('id, child_id, status, final_level, final_pct, questions_asked, started_at, completed_at, amount_paid, is_free')
+    .eq('child_id', childId)
+    .eq('parent_id', user.id)
+    .eq('module', 'mod_speech_basic')
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!session) return { error: 'No session' };
+  return session;
+}
+
+// Parent-wide version — used by the dashboard so "My Purchases" appears
+// regardless of which child is currently selected in the child switcher.
+export async function getLatestSpeechSessionForParent() {
+  const supabase = await createClient();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) return { error: 'Not signed in' };
+
+  const supabaseAdmin = createAdminClient();
+  const { data: session } = await supabaseAdmin
+    .from('eval_sessions')
+    .select('id, child_id, status, final_level, final_pct, questions_asked, started_at, completed_at')
+    .eq('parent_id', user.id)
+    .eq('module', 'mod_speech_basic')
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!session) return { error: 'No session' };
+  return session;
+}
+
+// Latest COMPLETED speech report for a child the parent owns — used to show a
+// returning parent their purchased report instead of the pay-gate.
+export async function getLatestSpeechReportForChild(childId: number) {
+  const supabase = await createClient();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) return { error: 'Not signed in' };
+
+  const supabaseAdmin = createAdminClient();
+  const { data: session } = await supabaseAdmin
+    .from('eval_sessions')
+    .select(`
+      *,
+      children (
+        name,
+        dob
+      )
+    `)
+    .eq('child_id', childId)
+    .eq('parent_id', user.id)
+    .eq('module', 'mod_speech_basic')
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!session) {
+    return { error: 'No report' };
+  }
+
+  return {
+    final_level: session.final_level,
+    final_pct: session.final_pct,
+    questions_asked: session.questions_asked,
+    report_md: session.report_md,
+    sample_exercise_md: session.sample_exercise_md,
+    final_level_name: getSpeechLevelDesc(session.final_level).name,
+    child_id: session.child_id,
+    child_name: session.children?.name,
+  };
+}
+
 function isEmpty(val: any): boolean {
   return val === null || val === undefined || val === '';
+}
+
+// Check if speech eval is permanently unlocked for this child
+export async function isSpeechEvalUnlocked(childId: number): Promise<boolean> {
+  const supabase = await createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return false;
+  const db = createAdminClient();
+  const { count } = await db
+    .from('wallet_ledger')
+    .select('*', { count: 'exact', head: true })
+    .eq('parent_id', user.id)
+    .eq('service_key', 'speech_eval_unlock')
+    .eq('ref_id', childId);
+  return (count || 0) > 0;
+}
+
+// Permanently unlock speech eval for a child — deducts 1000 credits once.
+// After this, the child's eval page opens directly without a payment gate.
+export async function unlockSpeechEvalAction(
+  childId: number
+): Promise<{ ok: boolean; error?: string; insufficient?: boolean; need?: number; balance?: number }> {
+  const supabase = await createClient();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) return { ok: false, error: 'Please log in again.' };
+
+  const db = createAdminClient();
+
+  const { data: child } = await db
+    .from('children')
+    .select('id, name')
+    .eq('id', childId)
+    .eq('parent_id', user.id)
+    .maybeSingle();
+  if (!child) return { ok: false, error: 'Child not found.' };
+
+  // Already unlocked?
+  if (await isSpeechEvalUnlocked(childId)) return { ok: true };
+
+  const { data: parent } = await db.from('parents').select('credits').eq('id', user.id).single();
+  const balance = parent?.credits || 0;
+  const PRICE = 1000;
+  if (balance < PRICE) return { ok: false, insufficient: true, need: PRICE, balance, error: 'Insufficient credits.' };
+
+  const newBalance = balance - PRICE;
+  await db.from('parents').update({ credits: newBalance }).eq('id', user.id);
+
+  await db.from('wallet_ledger').insert({
+    parent_id: user.id,
+    amount: -PRICE,
+    balance_after: newBalance,
+    service_key: 'speech_eval_unlock',
+    ref_id: childId,
+    reason: `Speech & Language Evaluation unlocked for ${child.name}`,
+  });
+
+  const { revalidatePath } = await import('next/cache');
+  revalidatePath(`/child/${childId}`);
+  revalidatePath('/dashboard');
+  return { ok: true, balance: newBalance };
 }

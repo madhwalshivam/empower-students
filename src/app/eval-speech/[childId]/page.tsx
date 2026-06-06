@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -25,7 +25,10 @@ import {
   startSpeechEvalSession,
   submitSpeechAnswer,
   cancelSpeechSession,
-  getSpeechSessionReport
+  getSpeechSessionReport,
+  getLatestSpeechReportForChild,
+  getLatestSpeechSession,
+  isSpeechEvalUnlocked,
 } from '@/app/actions/speech';
 
 // Simple markdown-to-HTML parser for safety and styling
@@ -86,15 +89,78 @@ export default function SpeechEvalPage() {
   const timerRef = useRef<any>(null);
   const silenceTimerRef = useRef<any>(null);
   const audioStartTimeRef = useRef<number>(0);
+  // Synchronous listening flag — state (isListening) is async so it can be stale
+  // inside callbacks. This ref is always current and prevents duplicate sessions.
+  const isListeningRef = useRef(false);
 
-  // Browser support check
+  // On mount: restore the right screen based on DB state so a returning parent
+  // never loses their paid session. Run only once ([] dep) — StrictMode would
+  // double-fire and reset the screen mid-interview, null-crashing handleDoneSpeaking.
   useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setScreen('unsupported');
-    } else {
-      setScreen('gate');
-    }
+    if (!childId || isNaN(childId)) return;
+    (async () => {
+      // 1. Completed session → show report immediately (no gate, no re-payment).
+      const reportRes = await getLatestSpeechReportForChild(childId);
+      if (!('error' in reportRes)) {
+        setReport(reportRes);
+        setScreen('report');
+        return;
+      }
+
+      // 2. Previously paid session (in_progress OR abandoned) → start/resume for
+      //    FREE. Parent already paid; startSpeechEvalSession now skips the charge
+      //    when a prior cost_paid > 0 session exists for this child.
+      const sessionRes = await getLatestSpeechSession(childId);
+      const hasPaidSession = !('error' in sessionRes) &&
+        (sessionRes.status === 'in_progress' || sessionRes.status === 'abandoned');
+      if (hasPaidSession) {
+        setScreen('loading');
+        const resumed = await startSpeechEvalSession(childId);
+        if (!('error' in resumed)) {
+          setSession({ id: resumed.session_id });
+          setCurrentQuestion(resumed.question);
+          setScreen('interview');
+          setTranscript('');
+          setStatusMessage(sessionRes.status === 'in_progress' ? 'Resuming your session…' : 'Starting your purchased session…');
+          setTimeout(() => { if (resumed.question) speakPrompt(resumed.question.prompt); }, 500);
+          setTimeout(() => { startListening(); }, 2500);
+          return;
+        }
+      }
+
+      // 3. Check if permanently unlocked (via explicit unlock action)
+      const unlocked = await isSpeechEvalUnlocked(childId);
+      if (unlocked) {
+        setScreen('loading');
+        const started = await startSpeechEvalSession(childId);
+        if (!('error' in started)) {
+          setSession({ id: started.session_id });
+          setCurrentQuestion(started.question);
+          setScreen('interview');
+          setTranscript('');
+          setStatusMessage('Ready to begin…');
+          setTimeout(() => { if (started.question) speakPrompt(started.question.prompt); }, 500);
+          setTimeout(() => { startListening(); }, 2500);
+          return;
+        }
+      }
+
+      // 4. No paid session → regular gate (Start Evaluation, 1000 credits).
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      setScreen(SpeechRecognition ? 'gate' : 'unsupported');
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Stop mic + clear timers on unmount so stale closures never fire handleDoneSpeaking
+  // on the next page load and trigger the "Session lost" false-positive error.
+  useEffect(() => {
+    return () => {
+      try { recognitionRef.current?.stop(); } catch {}
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+      window.speechSynthesis?.cancel();
+    };
   }, []);
 
   // Timer increment
@@ -144,18 +210,25 @@ export default function SpeechEvalPage() {
   // Start Mic Listening
   const startListening = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition || isListening) return;
+    if (!SpeechRecognition) return;
+
+    // Use the REF guard (synchronous) instead of `isListening` state (async).
+    // State is stale inside callbacks — so `isListening` stays `true` after an
+    // error/stop, causing startListening() to bail on every subsequent question.
+    if (isListeningRef.current) {
+      try { recognitionRef.current?.stop(); } catch {}
+      isListeningRef.current = false;
+    }
 
     try {
       const rec = new SpeechRecognition();
       rec.continuous = true;
       rec.interimResults = true;
-      
-      // Hindi prompt detection for recognition language selection
-      const isHindi = currentQuestion?.prompt ? /[\u0900-\u097F]/.test(currentQuestion.prompt) : false;
+      const isHindi = currentQuestion?.prompt ? /[ऀ-ॿ]/.test(currentQuestion.prompt) : false;
       rec.lang = isHindi ? 'hi-IN' : 'en-IN';
 
       rec.onstart = () => {
+        isListeningRef.current = true;
         setIsListening(true);
         setStatusMessage('Listening to your child...');
         audioStartTimeRef.current = Date.now();
@@ -164,15 +237,9 @@ export default function SpeechEvalPage() {
       rec.onresult = (event: any) => {
         let finalTrans = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTrans += event.results[i][0].transcript;
-          } else {
-            finalTrans += event.results[i][0].transcript;
-          }
+          finalTrans += event.results[i][0].transcript;
         }
         setTranscript(finalTrans);
-
-        // Auto-submit silence timeout (3 seconds of no new speech)
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         silenceTimerRef.current = setTimeout(() => {
           handleDoneSpeaking(finalTrans);
@@ -180,22 +247,33 @@ export default function SpeechEvalPage() {
       };
 
       rec.onerror = (e: any) => {
-        console.error('Speech recognition error:', e);
-        if (e.error === 'no-speech') {
-          setStatusMessage('We didn\'t hear anything. Try again.');
-        } else {
-          setStatusMessage(`Mic issue: ${e.error}`);
+        if (recognitionRef.current !== rec) return; // stale rec from previous session — ignore
+        isListeningRef.current = false;
+        setIsListening(false);
+        const errCode: string = e?.error || '';
+        if (errCode === 'aborted') return;
+        if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
+          setShowManualInput(true);
+          setStatusMessage('Mic blocked — please type the answer below.');
+        } else if (errCode === 'network') {
+          setShowManualInput(true);
+          setStatusMessage('Mic network error — please type the answer below.');
         }
       };
 
       rec.onend = () => {
+        if (recognitionRef.current !== rec) return; // stale rec — ignore
+        isListeningRef.current = false;
         setIsListening(false);
       };
 
       recognitionRef.current = rec;
       rec.start();
     } catch (err) {
-      console.error('Error starting recognition:', err);
+      isListeningRef.current = false;
+      setIsListening(false);
+      setShowManualInput(true);
+      setStatusMessage('Mic not available — please type the answer below.');
     }
   };
 
@@ -208,6 +286,7 @@ export default function SpeechEvalPage() {
     }
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     setIsListening(false);
+    isListeningRef.current = false;
   };
 
   const handleStart = async () => {
@@ -238,6 +317,12 @@ export default function SpeechEvalPage() {
 
   const handleDoneSpeaking = async (finalTranscript?: string) => {
     stopListening();
+    // Guard: session may be null if the component re-mounted (e.g. hot-reload).
+    if (!session?.id) {
+      setError('Session lost — please go back and start a new evaluation.');
+      setScreen('gate');
+      return;
+    }
     const finalVal = (finalTranscript !== undefined ? finalTranscript : transcript || manualInput).trim();
     if (!finalVal) {
       setStatusMessage('Please speak or type an answer to continue.');
@@ -277,10 +362,15 @@ export default function SpeechEvalPage() {
       setManualInput('');
       setShowManualInput(false);
       setScreen('interview');
-      setStatusMessage('Ready for next question...');
+      setStatusMessage('Ready...');
       setTimeout(() => {
         if (res.question) speakPrompt(res.question.prompt);
       }, 500);
+      // Fallback: start listening directly after 2.5s in case TTS fails or is muted,
+      // so the mic is always active and the user is never stuck.
+      setTimeout(() => {
+        startListening();
+      }, 2500);
     }
   };
 
@@ -380,7 +470,6 @@ export default function SpeechEvalPage() {
             </div>
             <div className="text-right">
               <span className="text-[10px] text-slate-400 uppercase tracking-widest block font-bold">Charged at start</span>
-              <span className="text-xs font-semibold text-indigo-650 dark:text-indigo-400 mt-0.5 block">100% Refundable if unsatisfied</span>
             </div>
           </div>
 
@@ -483,53 +572,41 @@ export default function SpeechEvalPage() {
             </div>
 
             {/* Actions */}
-            <div className="w-full pt-6 flex flex-col sm:flex-row gap-3 items-center justify-center border-t border-slate-50 dark:border-slate-850">
-              {!showManualInput ? (
-                <>
-                  <button
-                    onClick={() => speakPrompt(currentQuestion.prompt)}
-                    className="w-full sm:w-auto bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs py-3 px-5 rounded-xl transition"
-                  >
-                    🔊 Hear Question Again
-                  </button>
-                  <button
-                    onClick={() => handleDoneSpeaking()}
-                    disabled={!transcript}
-                    className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 px-6 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 justify-center"
-                  >
-                    <Check size={14} /> Done Speaking
-                  </button>
-                  <button
-                    onClick={() => {
-                      stopListening();
-                      setShowManualInput(true);
-                    }}
-                    className="text-xs text-indigo-650 dark:text-indigo-400 font-bold hover:underline mt-2 sm:mt-0"
-                  >
-                    Keyboard Input
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={() => {
-                      setShowManualInput(false);
-                      setManualInput('');
-                      startListening();
-                    }}
-                    className="w-full sm:w-auto bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-750 dark:text-slate-300 font-bold text-xs py-3 px-5 rounded-xl transition"
-                  >
-                    🎙️ Use Microphone
-                  </button>
-                  <button
-                    onClick={() => handleDoneSpeaking()}
-                    disabled={!manualInput.trim()}
-                    className="w-full sm:w-auto bg-indigo-650 hover:bg-indigo-700 text-white font-bold text-xs py-3 px-6 rounded-xl transition disabled:opacity-40"
-                  >
-                    Submit Answer
-                  </button>
-                </>
-              )}
+            <div className="w-full pt-6 border-t border-slate-50 dark:border-slate-850 space-y-3">
+              {/* Keyboard input — always visible so user can always type */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={manualInput}
+                  onChange={(e) => setManualInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && manualInput.trim()) handleDoneSpeaking(); }}
+                  placeholder="Type answer here (or speak below)…"
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 outline-none focus:border-indigo-500 text-sm"
+                />
+                <button
+                  onClick={() => handleDoneSpeaking()}
+                  disabled={!manualInput.trim() && !transcript}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2.5 px-5 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  Submit
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => speakPrompt(currentQuestion.prompt)}
+                  className="flex-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-bold text-xs py-3 px-4 rounded-xl transition"
+                >
+                  🔊 Hear Again
+                </button>
+                {/* Done Speaking — enabled once mic has captured something OR user typed */}
+                <button
+                  onClick={() => handleDoneSpeaking()}
+                  disabled={!transcript && !manualInput.trim()}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 px-4 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 justify-center"
+                >
+                  <Check size={14} /> Done Speaking
+                </button>
+              </div>
             </div>
           </div>
 
@@ -548,16 +625,24 @@ export default function SpeechEvalPage() {
       {/* Evaluation Report view */}
       {screen === 'report' && report && (
         <div className="space-y-6 animate-fade-in">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <h1 className="heading-fun text-2xl font-bold text-slate-900 dark:text-white">
               Speech Evaluation Report
             </h1>
-            <Link
-              href="/dashboard"
-              className="bg-indigo-50 dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 text-indigo-700 dark:text-indigo-450 font-bold text-xs px-4 py-2 rounded-xl"
-            >
-              Dashboard
-            </Link>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={() => { setReport(null); setSession(null); setScreen('gate'); }}
+                style={{ background: '#f1f5f9', color: '#4f46e5', fontWeight: 700, fontSize: 12, padding: '8px 14px', borderRadius: 12, border: 'none', cursor: 'pointer' }}
+              >
+                New Eval
+              </button>
+              <Link
+                href="/dashboard"
+                className="bg-indigo-50 dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 text-indigo-700 dark:text-indigo-450 font-bold text-xs px-4 py-2 rounded-xl"
+              >
+                Dashboard
+              </Link>
+            </div>
           </div>
 
           {/* Score Summary Box */}

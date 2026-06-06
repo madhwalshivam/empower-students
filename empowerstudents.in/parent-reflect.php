@@ -131,8 +131,8 @@ require __DIR__ . '/includes/header.php';
 
   <!-- ────────── Landing ────────── -->
   <div id="screenLanding" class="hidden">
-    <div class="bg-gradient-to-br from-indigo-600 to-purple-700 text-white rounded-2xl p-6 md:p-8 mb-5 shadow-lg">
-      <h1 class="text-2xl md:text-3xl font-bold mb-2">A private space for you</h1>
+    <div class="bg-gradient-to-br from-indigo-600 to-purple-700 text-black rounded-2xl p-6 md:p-8 mb-5 shadow-lg">
+      <h1 class="text-2xl md:text-3xl text-black font-bold mb-2">A private space for you</h1>
       <p class="text-indigo-100 text-sm md:text-base leading-relaxed">
         Parenting a child with developmental needs is hard — and most of the weight you carry, no one sees.
         This is a 15-minute private reflection that helps you put words to what you're carrying,

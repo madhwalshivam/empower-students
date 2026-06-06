@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import ChildDetailClient from './ChildDetailClient';
+import { isSpeechEvalUnlocked } from '@/app/actions/speech';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,21 +65,38 @@ export default async function ChildDetailPage({ params }: PageProps) {
     .eq('id', user.id)
     .single();
 
-  // Load care pack
-  const { data: carePack } = await db
-    .from('care_packs')
-    .select('*')
-    .eq('child_id', childId)
+  // Care Pack unlock state — sourced from the wallet ledger (service_key
+  // 'care_pack'), so it works whether or not the optional care_packs cache
+  // table exists. The most-recent unlock row also gives us the start date for
+  // the 28-day tracker countdown.
+  const { data: cpLedger } = await db
+    .from('wallet_ledger')
+    .select('created_at')
     .eq('parent_id', user.id)
+    .eq('service_key', 'care_pack')
+    .eq('ref_id', childId)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
+
+  const carePackUnlocked = !!cpLedger;
+  let trackerDaysRemaining = 0;
+  if (cpLedger?.created_at) {
+    const daysSince = Math.floor((Date.now() - new Date(cpLedger.created_at).getTime()) / 86400000);
+    trackerDaysRemaining = Math.max(0, 28 - daysSince);
+  }
+
+  const speechUnlocked = await isSpeechEvalUnlocked(childId);
 
   return (
     <ChildDetailClient
       child={child}
       assessments={assessments || []}
-      carePack={carePack || null}
+      carePackUnlocked={carePackUnlocked}
+      trackerDaysRemaining={trackerDaysRemaining}
       parentCredits={parent?.credits || 0}
       inProgressModules={inProgressModules}
+      speechUnlocked={speechUnlocked}
     />
   );
 }

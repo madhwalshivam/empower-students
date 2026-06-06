@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { resetEvaluationAction } from '@/app/actions/child';
+import { unlockCarePackAction } from '@/app/actions/carepack';
+import { unlockSpeechEvalAction } from '@/app/actions/speech';
 import {
   ArrowLeft,
   Heart,
@@ -25,27 +27,88 @@ import {
   Coins,
   Trophy,
   ChevronRight,
+  Lock,
+  Wallet,
+  X,
+  Loader2,
+  Mic,
 } from 'lucide-react';
+
+const CARE_PACK_PRICE = 499;
 
 interface ChildDetailClientProps {
   child: any;
   assessments: any[];
-  carePack: any;
+  carePackUnlocked: boolean;
+  trackerDaysRemaining: number;
   parentCredits: number;
   inProgressModules?: string[];
+  speechUnlocked?: boolean;
 }
 
 export default function ChildDetailClient({
   child,
   assessments,
-  carePack,
+  carePackUnlocked,
+  trackerDaysRemaining,
   parentCredits,
   inProgressModules = [],
+  speechUnlocked = false,
 }: ChildDetailClientProps) {
   const router = useRouter();
   const [resetLoading, setResetLoading] = useState(false);
   const [resetError, setResetError] = useState('');
   const [resetSuccess, setResetSuccess] = useState('');
+
+  // Care Pack unlock confirmation modal
+  const [showUnlock, setShowUnlock] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockError, setUnlockError] = useState('');
+
+  // Speech eval unlock modal
+  const [showSpeechUnlock, setShowSpeechUnlock] = useState(false);
+  const [speechUnlocking, setSpeechUnlocking] = useState(false);
+  const [speechUnlockError, setSpeechUnlockError] = useState('');
+
+  const handleSpeechUnlock = async () => {
+    setSpeechUnlocking(true);
+    setSpeechUnlockError('');
+    try {
+      const res = await unlockSpeechEvalAction(Number(child.id));
+      if (res.ok) {
+        setShowSpeechUnlock(false);
+        router.refresh();
+      } else if (res.insufficient) {
+        setSpeechUnlockError(`You need ${res.need} credits but have only ${res.balance}. Please top up.`);
+      } else {
+        setSpeechUnlockError(res.error || 'Could not unlock.');
+      }
+    } catch (err: any) {
+      setSpeechUnlockError(err.message || 'Something went wrong.');
+    } finally {
+      setSpeechUnlocking(false);
+    }
+  };
+
+  const handleUnlock = async () => {
+    setUnlocking(true);
+    setUnlockError('');
+    try {
+      const res = await unlockCarePackAction(Number(child.id));
+      if (res.ok) {
+        setShowUnlock(false);
+        router.refresh();
+      } else if (res.insufficient) {
+        setUnlockError(`You need ${res.need} credits but have only ${res.balance}. Please top up your wallet.`);
+      } else {
+        setUnlockError(res.error || 'Could not unlock. Please try again.');
+      }
+    } catch (err: any) {
+      setUnlockError(err.message || 'Something went wrong.');
+    } finally {
+      setUnlocking(false);
+    }
+  };
 
   const completedCount = assessments.length;
   const totalModules = 8;
@@ -182,7 +245,7 @@ export default function ChildDetailClient({
       </div>
 
       {/* ── Care Pack Banner ── */}
-      {completedCount > 0 && !carePack && (
+      {completedCount > 0 && !carePackUnlocked && (
         <div style={{
           background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
           borderRadius: 24, padding: '28px 32px', color: '#fff',
@@ -205,18 +268,18 @@ export default function ChildDetailClient({
           <div style={{ textAlign: 'center', flexShrink: 0 }}>
             <div style={{ fontSize: 36, fontWeight: 900, lineHeight: 1 }}>499</div>
             <div style={{ fontSize: 12, opacity: 0.7, textDecoration: 'line-through', marginBottom: 14 }}>647 cr separately</div>
-            <Link
-              href={`/care-pack/${child.id}`}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#4f46e5', padding: '11px 24px', borderRadius: 14, fontWeight: 800, fontSize: 14, textDecoration: 'none', boxShadow: '0 4px 16px rgba(0,0,0,0.15)' }}
+            <button
+              onClick={() => { setUnlockError(''); setShowUnlock(true); }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#4f46e5', padding: '11px 24px', borderRadius: 14, fontWeight: 800, fontSize: 14, border: 'none', cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.15)' }}
             >
               <Coins size={16} /> Unlock Care Pack
-            </Link>
+            </button>
           </div>
         </div>
       )}
 
       {/* Care Pack Active state */}
-      {carePack && (
+      {carePackUnlocked && (
         <div style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: 24, padding: '24px 28px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
             <Trophy size={20} color="#059669" />
@@ -227,7 +290,7 @@ export default function ChildDetailClient({
             {[
               { href: `/growth-plan/${child.id}`, icon: Heart, label: 'Growth Plan', sub: '4-week personalised plan' },
               { href: `/course/${child.id}`, icon: BookOpen, label: 'Personal Course', sub: '5 AI-written lessons' },
-              { href: `/tracker/${child.id}`, icon: BarChart2, label: 'Daily Tracker', sub: `${carePack.tracker_days_remaining || 0} days remaining` },
+              { href: `/tracker/${child.id}`, icon: BarChart2, label: 'Daily Tracker', sub: `${trackerDaysRemaining} days remaining` },
             ].map((item) => (
               <Link key={item.href} href={item.href} style={{ background: '#fff', borderRadius: 16, padding: '18px 20px', textDecoration: 'none', border: '1px solid #d1fae5', display: 'flex', flexDirection: 'column', gap: 8, transition: 'box-shadow 0.15s' }}>
                 <item.icon size={22} color="#059669" />
@@ -248,6 +311,39 @@ export default function ChildDetailClient({
           <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '4px 12px', borderRadius: 20 }}>
             {completedCount} of {totalModules} completed
           </span>
+        </div>
+
+        {/* ── Premium Clinical Services ── */}
+        <div style={{ background: '#fff', border: '1px solid #f1f5f9', borderRadius: 20, padding: '20px 24px', boxShadow: '0 2px 12px rgba(0,0,0,0.04)', marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 800, color: '#1e293b', margin: '0 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Sparkles size={17} color="#4f46e5" /> Premium Clinical Services
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            {/* Speech & Language */}
+            {speechUnlocked ? (
+              <Link href={`/eval-speech/${child.id}`} style={{ background: 'linear-gradient(135deg,#f0fdf4,#ecfdf5)', border: '1.5px solid #a7f3d0', borderRadius: 16, padding: '16px 18px', textDecoration: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 800, fontSize: 13, color: '#065f46' }}>Speech &amp; Language</span>
+                  <span style={{ background: '#059669', color: '#fff', fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 99 }}>Unlocked</span>
+                </div>
+                <span style={{ fontSize: 12, color: '#059669', fontWeight: 700 }}>Open Evaluation →</span>
+              </Link>
+            ) : (
+              <div style={{ background: '#fafafa', border: '1px solid #e2e8f0', borderRadius: 16, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 800, fontSize: 13, color: '#1e293b' }}>Speech &amp; Language</span>
+                  <span style={{ background: '#eef2ff', color: '#4338ca', fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 99 }}>₹1,000</span>
+                </div>
+                <p style={{ fontSize: 12, color: '#64748b', margin: 0, lineHeight: 1.5 }}>Adaptive voice evaluation — articulation, fluency, comprehension.</p>
+                <button
+                  onClick={() => { setSpeechUnlockError(''); setShowSpeechUnlock(true); }}
+                  style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', color: '#fff', border: 'none', borderRadius: 12, padding: '9px', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                >
+                  <Lock size={14} /> Unlock for {child.name}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
@@ -404,6 +500,153 @@ export default function ChildDetailClient({
           </div>
         </div>
       </div>
+
+      {/* ── Speech Eval Unlock Modal ── */}
+      {showSpeechUnlock && (
+        <div
+          onClick={() => !speechUnlocking && setShowSpeechUnlock(false)}
+          style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 24, width: '100%', maxWidth: 420, boxShadow: '0 24px 60px rgba(0,0,0,0.3)', overflow: 'hidden' }}>
+            <div style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', padding: '24px 28px', color: '#fff', position: 'relative' }}>
+              <button onClick={() => !speechUnlocking && setShowSpeechUnlock(false)} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 10, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}>
+                <X size={16} />
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <Mic size={18} />
+                <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.85 }}>Unlock Speech Eval</span>
+              </div>
+              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Unlock for {child.name}?</h3>
+            </div>
+            <div style={{ padding: '24px 28px' }}>
+              <p style={{ margin: '0 0 18px', fontSize: 14, color: '#475569', lineHeight: 1.6 }}>
+                Do you want to unlock <strong>Speech &amp; Language Evaluation</strong> for {child.name}? This is a <strong>one-time unlock</strong> — you can retake the evaluation as many times as you need.
+              </p>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 16, padding: '16px 18px', marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>Amount</span>
+                  <span style={{ fontSize: 20, fontWeight: 900, color: '#4f46e5' }}>1,000 credits</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>Your balance</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: parentCredits >= 1000 ? '#059669' : '#dc2626' }}>
+                    {parentCredits} credits
+                  </span>
+                </div>
+              </div>
+              {parentCredits < 1000 && (
+                <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontWeight: 600, marginBottom: 16 }}>
+                  Not enough credits. <Link href="/wallet?need=1000" style={{ color: '#9a3412', fontWeight: 800 }}>Top up →</Link>
+                </div>
+              )}
+              {speechUnlockError && (
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontWeight: 600, marginBottom: 16 }}>
+                  {speechUnlockError}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => setShowSpeechUnlock(false)} disabled={speechUnlocking} style={{ flex: 1, background: '#f1f5f9', color: '#475569', padding: '12px', borderRadius: 14, fontWeight: 800, fontSize: 14, border: 'none', cursor: 'pointer' }}>Cancel</button>
+                <button
+                  onClick={handleSpeechUnlock}
+                  disabled={speechUnlocking || parentCredits < 1000}
+                  style={{ flex: 1.4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: speechUnlocking || parentCredits < 1000 ? '#c7d2fe' : 'linear-gradient(135deg,#4f46e5,#7c3aed)', color: '#fff', padding: '12px', borderRadius: 14, fontWeight: 800, fontSize: 14, border: 'none', cursor: speechUnlocking || parentCredits < 1000 ? 'not-allowed' : 'pointer' }}
+                >
+                  {speechUnlocking ? <><Loader2 size={15} className="animate-spin" /> Unlocking…</> : <><Mic size={15} /> Yes, unlock</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Unlock Confirmation Popup ── */}
+      {showUnlock && (
+        <div
+          onClick={() => !unlocking && setShowUnlock(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 50,
+            background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(3px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: 24, width: '100%', maxWidth: 440,
+              boxShadow: '0 24px 60px rgba(0,0,0,0.3)', overflow: 'hidden', position: 'relative',
+            }}
+          >
+            <div style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', padding: '24px 28px', color: '#fff', position: 'relative' }}>
+              <button
+                onClick={() => !unlocking && setShowUnlock(false)}
+                aria-label="Close"
+                style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 10, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}
+              >
+                <X size={16} />
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <Lock size={18} />
+                <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.85 }}>Confirm Unlock</span>
+              </div>
+              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Unlock {child.name}'s Care Pack?</h3>
+            </div>
+
+            <div style={{ padding: '24px 28px' }}>
+              <p style={{ margin: '0 0 18px', fontSize: 14, color: '#475569', lineHeight: 1.6 }}>
+                Do you want to unlock this module? This unlocks the personalised <strong>Growth Plan</strong>, <strong>Personal Course</strong> and <strong>Daily Tracker</strong> for {child.name}.
+              </p>
+
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 16, padding: '16px 18px', marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>Amount</span>
+                  <span style={{ fontSize: 20, fontWeight: 900, color: '#4f46e5' }}>{CARE_PACK_PRICE} credits</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>Your balance</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 14, fontWeight: 800, color: parentCredits >= CARE_PACK_PRICE ? '#059669' : '#dc2626' }}>
+                    <Wallet size={14} /> {parentCredits} credits
+                  </span>
+                </div>
+              </div>
+
+              {parentCredits < CARE_PACK_PRICE && (
+                <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                  <AlertTriangle size={15} /> Not enough credits.{' '}
+                  <Link href={`/wallet?need=${CARE_PACK_PRICE}`} style={{ color: '#9a3412', fontWeight: 800, textDecoration: 'underline' }}>Top up</Link>
+                </div>
+              )}
+
+              {unlockError && (
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                  <AlertTriangle size={15} /> {unlockError}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => setShowUnlock(false)}
+                  disabled={unlocking}
+                  style={{ flex: 1, background: '#f1f5f9', color: '#475569', padding: '12px', borderRadius: 14, fontWeight: 800, fontSize: 14, border: 'none', cursor: unlocking ? 'not-allowed' : 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUnlock}
+                  disabled={unlocking || parentCredits < CARE_PACK_PRICE}
+                  style={{
+                    flex: 1.4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    background: unlocking || parentCredits < CARE_PACK_PRICE ? '#c7d2fe' : 'linear-gradient(135deg, #4f46e5, #7c3aed)',
+                    color: '#fff', padding: '12px', borderRadius: 14, fontWeight: 800, fontSize: 14, border: 'none',
+                    cursor: unlocking || parentCredits < CARE_PACK_PRICE ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {unlocking ? (<><Loader2 size={15} className="animate-spin" /> Unlocking…</>) : (<><Coins size={15} /> Yes, unlock for {CARE_PACK_PRICE}</>)}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

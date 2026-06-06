@@ -5,6 +5,7 @@ import { ArrowLeft, Coins, Baby, Crown, Wallet } from 'lucide-react';
 import { requireAdminUser } from '@/lib/admin/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { Card, Badge, StatCard, EmptyState, inr, fmtDateTime, fmtDate } from '@/components/admin/ui';
+import GiveCreditsForm from './GiveCreditsForm';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,6 +61,8 @@ export default async function AdminParentDetailPage({ params }: { params: Promis
         <StatCard icon={Wallet} label="Revenue" value={inr(revenue)} accent="emerald" />
         <StatCard icon={Coins} label="Assessments" value={assessments.length} accent="violet" />
       </div>
+
+      <GiveCreditsForm parentId={parent.id} current={parent.credits || 0} />
 
       <div className="grid lg:grid-cols-2 gap-6">
         <Card className="p-6">

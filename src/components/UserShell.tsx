@@ -203,7 +203,7 @@ export default function UserShell({ children }: { children: React.ReactNode }) {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
             {/* Language Switcher */}
-            <div style={{ flexShrink: 0 }} className="lang-toggle inline-flex items-center rounded-full p-0.5 text-[10px] font-bold border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800">
+            <div data-no-translate style={{ flexShrink: 0 }} className="lang-toggle inline-flex items-center rounded-full p-0.5 text-[10px] font-bold border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800">
               <button
                 onClick={() => setLanguage('en')}
                 style={{ padding: '2px 8px', border: 0, cursor: 'pointer' }}

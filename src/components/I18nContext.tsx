@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import HindiTranslator from './HindiTranslator';
 
 const translations: Record<string, Record<string, string>> = {
   en: {
@@ -161,11 +162,18 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setLanguage = (lang: Language) => {
-    setLanguageState(lang);
     try {
       localStorage.setItem('es_lang', lang);
     } catch {
       // ignore
+    }
+    setLanguageState(lang);
+    // Reload so the whole page (incl. server-rendered content) is re-evaluated
+    // from a clean slate. The HindiTranslator then translates everything on a
+    // Hindi load; an English load needs no work. This makes switching reliable
+    // and avoids having to revert already-translated DOM nodes.
+    if (typeof window !== 'undefined') {
+      window.location.reload();
     }
   };
 
@@ -176,6 +184,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   return (
     <I18nContext.Provider value={{ language, setLanguage, t }}>
       {children}
+      <HindiTranslator />
     </I18nContext.Provider>
   );
 }
